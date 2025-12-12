@@ -31,11 +31,16 @@ const Login: React.FC = () => {
       justifyContent: 'center', 
       alignItems: 'center', 
       minHeight: '100vh',
+      padding: '20px',
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
     }}>
       <Card 
         title="梁场养护机器人控制系统" 
-        style={{ width: 400, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}
+        style={{ 
+          width: '100%',
+          maxWidth: '500px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)' 
+        }}
       >
         <Form
           name="login"

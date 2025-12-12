@@ -32,8 +32,8 @@ const Dashboard: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ padding: '24px' }}>
-      <h2>系统概览</h2>
+    <div>
+      <h2 style={{ marginBottom: '24px' }}>系统概览</h2>
       
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} lg={6}>
