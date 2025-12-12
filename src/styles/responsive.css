@@ -476,3 +476,19 @@ button:active,
   min-width: 44px !important;
   min-height: 44px !important;
 }
+
+/* 表格对齐优化 */
+.ant-table-wrapper {
+  width: 100% !important;
+  margin: 0 !important;
+}
+
+.ant-table {
+  width: 100% !important;
+}
+
+.ant-card-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start !important;
+}

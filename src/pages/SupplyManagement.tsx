@@ -369,6 +369,8 @@ const SupplyManagement: React.FC = () => {
               rowKey="id"
               pagination={false}
               size="small"
+              style={{ width: '100%' }}
+              scroll={{ x: 'max-content' }}
             />
           </Card>
         </Col>

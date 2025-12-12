@@ -171,6 +171,8 @@ const ScheduleManagement: React.FC = () => {
         dataSource={schedules}
         rowKey="id"
         loading={loading}
+        style={{ width: '100%' }}
+        scroll={{ x: 'max-content' }}
       />
 
       <Modal

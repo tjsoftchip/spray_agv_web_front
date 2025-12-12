@@ -217,7 +217,14 @@ const TaskManagement: React.FC = () => {
         </Button>
       </div>
 
-      <Table columns={columns} dataSource={tasks} rowKey="id" loading={loading} />
+      <Table 
+        columns={columns} 
+        dataSource={tasks} 
+        rowKey="id" 
+        loading={loading}
+        style={{ width: '100%' }}
+        scroll={{ x: 'max-content' }}
+      />
 
       <Modal
         title="创建任务"
