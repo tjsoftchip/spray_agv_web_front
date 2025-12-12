@@ -4,14 +4,14 @@ const getApiBaseUrl = (): string => {
   const envUrl = import.meta.env.VITE_API_BASE_URL;
   
   if (envUrl && envUrl.startsWith('/')) {
-    return `${window.location.protocol}//${window.location.hostname}:3001${envUrl}`;
+    return `${window.location.protocol}//${window.location.hostname}:3000${envUrl}`;
   }
   
   if (envUrl) {
     return envUrl;
   }
   
-  return `${window.location.protocol}//${window.location.hostname}:3001/api`;
+  return `${window.location.protocol}//${window.location.hostname}:3000/api`;
 };
 
 const API_BASE_URL = getApiBaseUrl();
