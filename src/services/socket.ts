@@ -7,7 +7,10 @@ const getWsUrl = (): string => {
     return envUrl;
   }
   
-  return `${window.location.protocol}//${window.location.hostname}:3000`;
+  // 使用当前页面的主机地址，确保跨设备访问
+  const hostname = window.location.hostname;
+  const port = hostname === 'localhost' || hostname === '127.0.0.1' ? '3000' : '3000';
+  return `${window.location.protocol}//${hostname}:${port}`;
 };
 
 const WS_URL = getWsUrl();

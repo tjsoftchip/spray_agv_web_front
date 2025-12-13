@@ -22,35 +22,132 @@ const MapManagement: React.FC = () => {
 
   useEffect(() => {
     loadMaps();
+    checkMappingStatus();
     
     // 连接WebSocket
     socketService.connect();
     
+    // 定期检查建图状态
+    const statusInterval = setInterval(() => {
+      checkMappingStatus();
+    }, 3000); // 每3秒检查一次
+    
+    return () => {
+      clearInterval(statusInterval);
+    };
+  }, []);
+  
+  useEffect(() => {
     // 订阅地图数据
     socketService.on('ros_message', (data: any) => {
       console.log('Received ROS message:', data.topic, data.msg ? 'has msg' : 'no msg');
       
       if (data.topic === '/map') {
-        console.log('Map data received:', data.msg);
-        if (data.msg && data.msg.info && data.msg.data) {
-          console.log('Map info:', data.msg.info);
-          console.log('Map data length:', data.msg.data.length);
-          setMapData(data.msg);
-        } else {
-          console.warn('Invalid map data structure:', data.msg);
+        console.log('Map data received:', data.msg ? 'has msg' : 'no msg');
+        if (data.msg) {
+          console.log('Map data structure:', {
+            hasInfo: !!data.msg.info,
+            hasData: !!data.msg.data,
+            infoKeys: data.msg.info ? Object.keys(data.msg.info) : [],
+            dataType: typeof data.msg.data,
+            dataLength: data.msg.data ? (Array.isArray(data.msg.data) ? data.msg.data.length : 'not array') : 'no data'
+          });
+          if (data.msg.info && data.msg.data) {
+            console.log('Map info:', data.msg.info);
+            console.log('Map data length:', data.msg.data.length);
+            setMapData(data.msg);
+          } else {
+            console.warn('Invalid map data structure:', data.msg);
+          }
         }
       } else if (data.topic === '/robot_pose_k') {
         console.log('Robot pose received:', data.msg);
         setRobotPose(data.msg);
+      } else if (data.topic === '/robot_pose') {
+        console.log('Robot pose received:', data.msg);
+        setRobotPose(data.msg);
       } else if (data.topic === '/odom') {
-        // 如果没有robot_pose_k数据，使用里程计数据
-        if (!robotPose && data.msg && data.msg.pose && data.msg.pose.pose) {
+        // 使用里程计数据作为机器人位置（持续更新）
+        if (data.msg && data.msg.pose && data.msg.pose.pose) {
           console.log('Using odom data as robot pose:', data.msg);
           const odomPose = {
             header: data.msg.header,
             pose: data.msg.pose.pose
           };
           setRobotPose(odomPose);
+        }
+      } else if (data.topic === '/amcl_pose') {
+        // AMCL定位数据
+        if (data.msg && data.msg.pose) {
+          console.log('Using AMCL pose:', data.msg);
+          const amclPose = {
+            header: data.msg.header,
+            pose: data.msg.pose.pose
+          };
+          setRobotPose(amclPose);
+        }
+      } else if (data.topic === '/tf') {
+        // 从tf消息中提取base_link到map的变换
+        if (data.msg && data.msg.transforms) {
+          console.log('TF transforms received:', data.msg.transforms.length);
+          data.msg.transforms.forEach((t: any) => {
+            console.log(`TF: ${t.header.frame_id} -> ${t.child_frame_id}`);
+          });
+          
+          // 查找正确的TF变换
+          const mapToOdom = data.msg.transforms.find((t: any) => 
+            t.header.frame_id === 'map' && t.child_frame_id === 'odom'
+          );
+          
+          const odomToBaseFootprint = data.msg.transforms.find((t: any) => 
+            t.header.frame_id === 'odom' && t.child_frame_id === 'base_footprint'
+          );
+          
+          if (mapToOdom && odomToBaseFootprint) {
+            // 组合变换：map -> odom -> base_footprint
+            // 简化处理：将odom->base_footprint的位置加上map->odom的偏移
+            const mapX = mapToOdom.transform.translation.x + odomToBaseFootprint.transform.translation.x;
+            const mapY = mapToOdom.transform.translation.y + odomToBaseFootprint.transform.translation.y;
+            
+            // 组合四元数（简化处理）
+            const tfPose = {
+              header: {
+                stamp: mapToOdom.header.stamp,
+                frame_id: 'map'
+              },
+              pose: {
+                position: {
+                  x: mapX,
+                  y: mapY,
+                  z: 0
+                },
+                orientation: odomToBaseFootprint.transform.rotation
+              }
+            };
+            console.log('Using combined tf data as robot pose:', tfPose);
+            setRobotPose(tfPose);
+          } else {
+            console.log('Missing TF transforms. Found map->odom:', !!mapToOdom, 'odom->base_footprint:', !!odomToBaseFootprint);
+          }
+        }
+      } else if (data.topic === '/tf_static') {
+        // 静态tf变换
+        if (data.msg && data.msg.transforms) {
+          const staticTf = data.msg.transforms.find((t: any) => 
+            t.header.frame_id === 'odom' && t.child_frame_id === 'base_link'
+          );
+          
+          if (staticTf) {
+            const staticPose = {
+              header: staticTf.header,
+              pose: {
+                position: staticTf.transform.translation,
+                orientation: staticTf.transform.rotation
+              }
+            };
+            console.log('Using static tf as robot pose:', staticPose);
+            setRobotPose(staticPose);
+          }
         }
       }
     });
@@ -99,7 +196,7 @@ const MapManagement: React.FC = () => {
     }
     
     const { width, height } = mapData.info;
-    const gridData = mapData.data;
+    let gridData = mapData.data;
     const resolution = mapData.info.resolution;
     
     // 确保gridData是数组且有正确的长度
@@ -167,6 +264,46 @@ const MapManagement: React.FC = () => {
     // 绘制地图网格
     if (gridData.length === width * height) {
       const imageData = ctx.createImageData(width, height);
+      let knownPixels = 0;
+      
+      for (let i = 0; i < gridData.length; i++) {
+        const value = gridData[i];
+        let color = 205; // 未知区域(浅灰色)
+        
+        if (value === 0) {
+          color = 255; // 空闲区域(白色)
+          knownPixels++;
+        } else if (value === 100) {
+          color = 0; // 占用区域(黑色)
+          knownPixels++;
+        } else if (value > 0 && value < 100) {
+          // 占用概率区域
+          color = Math.floor(255 - (value / 100) * 255);
+          knownPixels++;
+        }
+        
+        const idx = i * 4;
+        imageData.data[idx] = color;
+        imageData.data[idx + 1] = color;
+        imageData.data[idx + 2] = color;
+        imageData.data[idx + 3] = 255;
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      console.log('Map drawn successfully, known pixels:', knownPixels, 'of', gridData.length);
+    } else {
+      // 验证gridData长度，如果数据不完整，使用填充值
+      if (gridData.length < width * height) {
+        console.warn('Grid data incomplete, padding with unknown values');
+        const paddedData = new Array(width * height).fill(-1); // -1表示未知区域
+        gridData = paddedData.map((val, idx) => idx < gridData.length ? gridData[idx] : val);
+      } else if (gridData.length > width * height) {
+        console.warn('Grid data too large, truncating');
+        gridData = gridData.slice(0, width * height);
+      }
+      
+      // 重新绘制处理后的地图数据
+      const imageData = ctx.createImageData(width, height);
       for (let i = 0; i < gridData.length; i++) {
         const value = gridData[i];
         let color = 205; // 未知区域(灰色)
@@ -185,25 +322,11 @@ const MapManagement: React.FC = () => {
       }
       
       ctx.putImageData(imageData, 0, 0);
-      console.log('Map drawn successfully');
-    } else {
-      console.error('Grid data length mismatch:', { 
-        actual: gridData.length, 
-        expected: width * height 
-      });
-      
-      // 绘制错误提示
-      ctx.fillStyle = '#ff0000';
-      ctx.font = '20px Arial';
-      ctx.fillText('地图数据错误', width/2 - 50, height/2);
+      console.log('Map drawn successfully after data correction');
     }
     
     // 保存当前状态
     ctx.save();
-    
-    // 应用缩放和平移
-    ctx.scale(finalScale / resolution, finalScale / resolution);
-    ctx.translate(offset.x / (finalScale / resolution), offset.y / (finalScale / resolution));
     
     // 绘制机器人位置
     let robotX = width / 2; // 默认位置：地图中心
@@ -211,52 +334,93 @@ const MapManagement: React.FC = () => {
     let hasValidPose = false;
     
     if (robotPose && robotPose.pose && robotPose.pose.position && mapData.info && mapData.info.origin && mapData.info.origin.position) {
+      // 计算机器人在地图像素坐标系中的位置
       robotX = (robotPose.pose.position.x - mapData.info.origin.position.x) / resolution;
-      robotY = height - (robotPose.pose.position.y - mapData.info.origin.position.y) / resolution;
+      robotY = (robotPose.pose.position.y - mapData.info.origin.position.y) / resolution;
       hasValidPose = true;
-      console.log('Drawing robot at:', robotX, robotY, 'scale:', scale);
+      console.log('Robot pose in world:', robotPose.pose.position.x, robotPose.pose.position.y);
+      console.log('Robot pose in map pixels:', robotX, robotY);
+      console.log('Map size:', width, 'x', height);
+      console.log('Map origin:', mapData.info.origin.position.x, mapData.info.origin.position.y);
+      console.log('Resolution:', resolution);
     } else {
       console.log('Robot pose data missing, using default center position:', robotPose);
     }
     
-    // 绘制机器人
-    ctx.fillStyle = 'red';
-    ctx.beginPath();
-    ctx.arc(robotX, robotY, 5 / scale, 0, 2 * Math.PI);
-    ctx.fill();
+    // 确保机器人在地图范围内
+    robotX = Math.max(0, Math.min(width, robotX));
+    robotY = Math.max(0, Math.min(height, robotY));
     
-    // 绘制机器人朝向
+    // 绘制机器人
+    ctx.fillStyle = '#2196F3'; // 使用蓝色更接近地图应用中的车辆图标
+    ctx.strokeStyle = '#1976D2'; // 深蓝色边框
+    ctx.lineWidth = 2;
+    
+    // 计算机器人显示大小（固定像素大小）
+    const robotSizePixels = 20; // 固定20像素大小
+    
+    // 计算机器人朝向
+    let robotYaw = 0; // 默认朝上
     if (hasValidPose && robotPose.pose.orientation) {
-      const yaw = Math.atan2(
+      robotYaw = Math.atan2(
         2 * (robotPose.pose.orientation.w * robotPose.pose.orientation.z + 
              robotPose.pose.orientation.x * robotPose.pose.orientation.y),
         1 - 2 * (robotPose.pose.orientation.y * robotPose.pose.orientation.y + 
                  robotPose.pose.orientation.z * robotPose.pose.orientation.z)
       );
-      
-      const arrowLength = 15 / scale;
-      const endX = robotX + arrowLength * Math.cos(yaw);
-      const endY = robotY + arrowLength * Math.sin(yaw);
-      
-      ctx.strokeStyle = 'red';
-      ctx.lineWidth = 2 / scale;
-      ctx.beginPath();
-      ctx.moveTo(robotX, robotY);
-      ctx.lineTo(endX, endY);
-      ctx.stroke();
-    } else {
-      // 绘制默认朝向（向上）
-      const arrowLength = 15 / scale;
-      const endX = robotX;
-      const endY = robotY - arrowLength;
-      
-      ctx.strokeStyle = 'red';
-      ctx.lineWidth = 2 / scale;
-      ctx.beginPath();
-      ctx.moveTo(robotX, robotY);
-      ctx.lineTo(endX, endY);
-      ctx.stroke();
     }
+    
+    // 计算机器人在canvas上的显示位置
+    // 先计算地图的缩放比例
+    const mapScale = finalScale / resolution;
+    
+    // 将地图坐标转换为canvas坐标
+    const canvasX = robotX * mapScale;
+    const canvasY = robotY * mapScale;
+    
+    // 增大机器人显示尺寸
+    const robotDisplaySize = 40; // 增大到40像素
+    
+    // 绘制机器人主体（圆形）
+    ctx.beginPath();
+    ctx.arc(canvasX, canvasY, robotDisplaySize * 0.6, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.stroke();
+    
+    // 绘制方向指示器（三角形箭头）
+    ctx.save();
+    ctx.translate(canvasX, canvasY);
+    ctx.rotate(robotYaw);
+    
+    // 绘制三角形箭头
+    ctx.beginPath();
+    ctx.moveTo(0, -robotDisplaySize); // 箭头顶点
+    ctx.lineTo(-robotDisplaySize * 0.4, robotDisplaySize * 0.3); // 左下角
+    ctx.lineTo(robotDisplaySize * 0.4, robotDisplaySize * 0.3); // 右下角
+    ctx.closePath();
+    
+    // 填充三角形
+    ctx.fillStyle = '#2196F3';
+    ctx.fill();
+    ctx.strokeStyle = '#1976D2';
+    ctx.stroke();
+    
+    ctx.restore();
+    
+    // 绘制机器人中心点
+    ctx.beginPath();
+    ctx.arc(canvasX, canvasY, robotDisplaySize * 0.15, 0, 2 * Math.PI);
+    ctx.fillStyle = '#FFFFFF'; // 白色中心点
+    ctx.fill();
+    
+    // 绘制机器人边框（更明显的边框）
+    ctx.beginPath();
+    ctx.arc(canvasX, canvasY, robotDisplaySize * 0.6, 0, 2 * Math.PI);
+    ctx.strokeStyle = '#FF0000'; // 红色边框更醒目
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    
+    console.log('Robot drawn at canvas position:', canvasX, canvasY, 'size:', robotDisplaySize);
     
     // 恢复画布状态
     ctx.restore();
@@ -271,6 +435,56 @@ const MapManagement: React.FC = () => {
       message.error('加载地图列表失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkMappingStatus = async () => {
+    try {
+      // 首先尝试通过API服务获取状态
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const response = await fetch(`${window.location.protocol}//${window.location.hostname}:3000/api/maps/mapping-status`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          if (response.ok) {
+            const status = await response.json();
+            console.log('Mapping status response:', status);
+            if (status.isMapping) {
+              setMappingStatus('mapping');
+              return;
+            } else {
+              setMappingStatus('idle');
+              return;
+            }
+          }
+        } catch (error) {
+          console.log('API request failed, trying local endpoint');
+        }
+      }
+      
+      // 备选方案：使用本地状态检查端点
+      const localResponse = await fetch(`${window.location.protocol}//${window.location.hostname}:3000/api/maps/mapping-status-local`);
+      if (localResponse.ok) {
+        const status = await localResponse.json();
+        console.log('Local mapping status:', status);
+        if (status.isMapping) {
+          setMappingStatus('mapping');
+        } else {
+          setMappingStatus('idle');
+        }
+      } else {
+        console.log('Local endpoint also failed');
+        setMappingStatus('idle');
+      }
+    } catch (error) {
+      console.error('Failed to check mapping status:', error);
+      setMappingStatus('idle');
     }
   };
 

@@ -27,7 +27,7 @@ const Loading: React.FC<LoadingProps> = ({
     );
   }
 
-  const spinContent = <Spin indicator={antIcon} size={size} tip={tip} />;
+  const spinContent = <Spin indicator={antIcon} size={size} tip={fullscreen ? tip : undefined} />;
 
   if (fullscreen) {
     return (

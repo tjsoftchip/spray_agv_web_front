@@ -91,7 +91,7 @@ const RealTimeMonitor: React.FC = () => {
               value={batteryLevel}
               suffix="%"
               prefix={<ThunderboltOutlined />}
-              valueStyle={{ color: batteryLevel > 20 ? '#3f8600' : '#cf1322' }}
+              styles={{ content: { color: batteryLevel > 20 ? '#3f8600' : '#cf1322' } }}
             />
             <Progress percent={batteryLevel} status={batteryLevel > 20 ? 'active' : 'exception'} />
           </Card>
@@ -103,7 +103,7 @@ const RealTimeMonitor: React.FC = () => {
               value={waterLevel}
               suffix="%"
               prefix={<DropboxOutlined />}
-              valueStyle={{ color: waterLevel > 10 ? '#3f8600' : '#cf1322' }}
+              styles={{ content: { color: waterLevel > 10 ? '#3f8600' : '#cf1322' } }}
             />
             <Progress percent={waterLevel} status={waterLevel > 10 ? 'active' : 'exception'} />
           </Card>
@@ -152,60 +152,62 @@ const RealTimeMonitor: React.FC = () => {
         <Col xs={24} lg={12}>
           <Card title="电池电量监控">
             <Suspense fallback={<Loading type="skeleton" rows={6} />}>
-              <ReactECharts
-                option={{
-                  tooltip: {
-                    trigger: 'axis',
-                    formatter: '{b}: {c}%',
-                  },
-                  xAxis: {
-                    type: 'category',
-                    data: Array.from({ length: 20 }, (_, i) => `${i}s`),
-                    boundaryGap: false,
-                  },
-                  yAxis: {
-                    type: 'value',
-                    min: 0,
-                    max: 100,
-                    axisLabel: {
-                      formatter: '{value}%',
+              <div style={{ height: '300px', width: '100%' }}>
+                <ReactECharts
+                  option={{
+                    tooltip: {
+                      trigger: 'axis',
+                      formatter: '{b}: {c}%',
                     },
-                  },
-                  series: [
-                    {
-                      name: '电池电量',
-                      type: 'line',
-                      data: Array.from({ length: 20 }, () => batteryLevel + Math.random() * 5 - 2.5),
-                      smooth: true,
-                      itemStyle: {
-                        color: '#52c41a',
+                    xAxis: {
+                      type: 'category',
+                      data: Array.from({ length: 20 }, (_, i) => `${i}s`),
+                      boundaryGap: false,
+                    },
+                    yAxis: {
+                      type: 'value',
+                      min: 0,
+                      max: 100,
+                      axisLabel: {
+                        formatter: '{value}%',
                       },
-                      areaStyle: {
-                        color: {
-                          type: 'linear',
-                          x: 0,
-                          y: 0,
-                          x2: 0,
-                          y2: 1,
-                          colorStops: [
-                            { offset: 0, color: 'rgba(82, 196, 26, 0.3)' },
-                            { offset: 1, color: 'rgba(82, 196, 26, 0.05)' },
-                          ],
+                    },
+                    series: [
+                      {
+                        name: '电池电量',
+                        type: 'line',
+                        data: Array.from({ length: 20 }, () => batteryLevel + Math.random() * 5 - 2.5),
+                        smooth: true,
+                        itemStyle: {
+                          color: '#52c41a',
+                        },
+                        areaStyle: {
+                          color: {
+                            type: 'linear',
+                            x: 0,
+                            y: 0,
+                            x2: 0,
+                            y2: 1,
+                            colorStops: [
+                              { offset: 0, color: 'rgba(82, 196, 26, 0.3)' },
+                              { offset: 1, color: 'rgba(82, 196, 26, 0.05)' },
+                            ],
+                          },
                         },
                       },
+                    ],
+                    grid: {
+                      left: '3%',
+                      right: '4%',
+                      bottom: '3%',
+                      containLabel: true,
                     },
-                  ],
-                  grid: {
-                    left: '3%',
-                    right: '4%',
-                    bottom: '3%',
-                    containLabel: true,
-                  },
-                }}
-                style={{ height: '250px' }}
-                notMerge={true}
-                lazyUpdate={true}
-              />
+                  }}
+                  style={{ height: '100%', width: '100%' }}
+                  notMerge={true}
+                  lazyUpdate={true}
+                />
+              </div>
             </Suspense>
           </Card>
         </Col>
@@ -213,60 +215,62 @@ const RealTimeMonitor: React.FC = () => {
         <Col xs={24} lg={12}>
           <Card title="水位监控">
             <Suspense fallback={<Loading type="skeleton" rows={6} />}>
-              <ReactECharts
-                option={{
-                  tooltip: {
-                    trigger: 'axis',
-                    formatter: '{b}: {c}%',
-                  },
-                  xAxis: {
-                    type: 'category',
-                    data: Array.from({ length: 20 }, (_, i) => `${i}s`),
-                    boundaryGap: false,
-                  },
-                  yAxis: {
-                    type: 'value',
-                    min: 0,
-                    max: 100,
-                    axisLabel: {
-                      formatter: '{value}%',
+<div style={{ height: '300px', width: '100%' }}>
+                <ReactECharts
+                  option={{
+                    tooltip: {
+                      trigger: 'axis',
+                      formatter: '{b}: {c}%',
                     },
-                  },
-                  series: [
-                    {
-                      name: '水位',
-                      type: 'line',
-                      data: Array.from({ length: 20 }, () => waterLevel + Math.random() * 5 - 2.5),
-                      smooth: true,
-                      itemStyle: {
-                        color: '#1890ff',
+                    xAxis: {
+                      type: 'category',
+                      data: Array.from({ length: 20 }, (_, i) => `${i}s`),
+                      boundaryGap: false,
+                    },
+                    yAxis: {
+                      type: 'value',
+                      min: 0,
+                      max: 100,
+                      axisLabel: {
+                        formatter: '{value}%',
                       },
-                      areaStyle: {
-                        color: {
-                          type: 'linear',
-                          x: 0,
-                          y: 0,
-                          x2: 0,
-                          y2: 1,
-                          colorStops: [
-                            { offset: 0, color: 'rgba(24, 144, 255, 0.3)' },
-                            { offset: 1, color: 'rgba(24, 144, 255, 0.05)' },
-                          ],
+                    },
+                    series: [
+                      {
+                        name: '水位',
+                        type: 'line',
+                        data: Array.from({ length: 20 }, () => waterLevel + Math.random() * 5 - 2.5),
+                        smooth: true,
+                        itemStyle: {
+                          color: '#1890ff',
+                        },
+                        areaStyle: {
+                          color: {
+                            type: 'linear',
+                            x: 0,
+                            y: 0,
+                            x2: 0,
+                            y2: 1,
+                            colorStops: [
+                              { offset: 0, color: 'rgba(24, 144, 255, 0.3)' },
+                              { offset: 1, color: 'rgba(24, 144, 255, 0.05)' },
+                            ],
+                          },
                         },
                       },
+                    ],
+                    grid: {
+                      left: '3%',
+                      right: '4%',
+                      bottom: '3%',
+                      containLabel: true,
                     },
-                  ],
-                  grid: {
-                    left: '3%',
-                    right: '4%',
-                    bottom: '3%',
-                    containLabel: true,
-                  },
-                }}
-                style={{ height: '250px' }}
-                notMerge={true}
-                lazyUpdate={true}
-              />
+                  }}
+                  style={{ height: '100%', width: '100%' }}
+                  notMerge={true}
+                  lazyUpdate={true}
+                />
+              </div>
             </Suspense>
           </Card>
         </Col>

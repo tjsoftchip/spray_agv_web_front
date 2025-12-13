@@ -42,7 +42,7 @@ const Dashboard: React.FC = () => {
               title="机器人状态"
               value={robotStatus.status === 'idle' ? '空闲' : '工作中'}
               prefix={<RobotOutlined />}
-              valueStyle={{ color: robotStatus.status === 'idle' ? '#3f8600' : '#1890ff' }}
+              styles={{ content: { color: robotStatus.status === 'idle' ? '#3f8600' : '#1890ff' } }}
             />
           </Card>
         </Col>
@@ -54,7 +54,7 @@ const Dashboard: React.FC = () => {
               value={robotStatus.battery}
               suffix="%"
               prefix={<ThunderboltOutlined />}
-              valueStyle={{ color: robotStatus.battery > 20 ? '#3f8600' : '#cf1322' }}
+              styles={{ content: { color: robotStatus.battery > 20 ? '#3f8600' : '#cf1322' } }}
             />
             <Progress 
               percent={robotStatus.battery} 
@@ -72,7 +72,7 @@ const Dashboard: React.FC = () => {
               value={robotStatus.waterLevel}
               suffix="%"
               prefix={<ExperimentOutlined />}
-              valueStyle={{ color: robotStatus.waterLevel > 10 ? '#3f8600' : '#cf1322' }}
+              styles={{ content: { color: robotStatus.waterLevel > 10 ? '#3f8600' : '#cf1322' } }}
             />
             <Progress 
               percent={robotStatus.waterLevel} 
@@ -90,7 +90,7 @@ const Dashboard: React.FC = () => {
               value={robotStatus.temperature}
               suffix="°C"
               prefix={<CheckCircleOutlined />}
-              valueStyle={{ color: '#1890ff' }}
+              styles={{ content: { color: '#1890ff' } }}
             />
           </Card>
         </Col>
@@ -127,56 +127,58 @@ const Dashboard: React.FC = () => {
         <Col xs={24} lg={12}>
           <Card title="电池电量趋势">
             <Suspense fallback={<Loading type="skeleton" rows={6} />}>
-              <ReactECharts
-              option={{
-                tooltip: {
-                  trigger: 'axis',
-                },
-                xAxis: {
-                  type: 'category',
-                  data: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00', '24:00'],
-                },
-                yAxis: {
-                  type: 'value',
-                  min: 0,
-                  max: 100,
-                  axisLabel: {
-                    formatter: '{value}%',
+<div style={{ height: '300px', width: '100%' }}>
+                <ReactECharts
+                option={{
+                  tooltip: {
+                    trigger: 'axis',
                   },
-                },
-                series: [
-                  {
-                    name: '电池电量',
-                    type: 'line',
-                    data: [95, 88, 82, 75, 70, 85, 85],
-                    smooth: true,
-                    itemStyle: {
-                      color: '#52c41a',
+                  xAxis: {
+                    type: 'category',
+                    data: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00', '24:00'],
+                  },
+                  yAxis: {
+                    type: 'value',
+                    min: 0,
+                    max: 100,
+                    axisLabel: {
+                      formatter: '{value}%',
                     },
-                    areaStyle: {
-                      color: {
-                        type: 'linear',
-                        x: 0,
-                        y: 0,
-                        x2: 0,
-                        y2: 1,
-                        colorStops: [
-                          { offset: 0, color: 'rgba(82, 196, 26, 0.3)' },
-                          { offset: 1, color: 'rgba(82, 196, 26, 0.05)' },
-                        ],
+                  },
+                  series: [
+                    {
+                      name: '电池电量',
+                      type: 'line',
+                      data: [95, 88, 82, 75, 70, 85, 85],
+                      smooth: true,
+                      itemStyle: {
+                        color: '#52c41a',
+                      },
+                      areaStyle: {
+                        color: {
+                          type: 'linear',
+                          x: 0,
+                          y: 0,
+                          x2: 0,
+                          y2: 1,
+                          colorStops: [
+                            { offset: 0, color: 'rgba(82, 196, 26, 0.3)' },
+                            { offset: 1, color: 'rgba(82, 196, 26, 0.05)' },
+                          ],
+                        },
                       },
                     },
+                  ],
+                  grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '3%',
+                    containLabel: true,
                   },
-                ],
-                grid: {
-                  left: '3%',
-                  right: '4%',
-                  bottom: '3%',
-                  containLabel: true,
-                },
-              }}
-              style={{ height: '300px' }}
-            />
+                }}
+                style={{ height: '100%', width: '100%' }}
+              />
+            </div>
             </Suspense>
           </Card>
         </Col>
@@ -184,52 +186,54 @@ const Dashboard: React.FC = () => {
         <Col xs={24} lg={12}>
           <Card title="任务统计">
             <Suspense fallback={<Loading type="skeleton" rows={6} />}>
-              <ReactECharts
-              option={{
-                tooltip: {
-                  trigger: 'item',
-                  formatter: '{a} <br/>{b}: {c} ({d}%)',
-                },
-                legend: {
-                  orient: 'vertical',
-                  left: 'left',
-                },
-                series: [
-                  {
-                    name: '任务状态',
-                    type: 'pie',
-                    radius: ['40%', '70%'],
-                    avoidLabelOverlap: false,
-                    itemStyle: {
-                      borderRadius: 10,
-                      borderColor: '#fff',
-                      borderWidth: 2,
-                    },
-                    label: {
-                      show: false,
-                      position: 'center',
-                    },
-                    emphasis: {
-                      label: {
-                        show: true,
-                        fontSize: 20,
-                        fontWeight: 'bold',
-                      },
-                    },
-                    labelLine: {
-                      show: false,
-                    },
-                    data: [
-                      { value: 15, name: '已完成', itemStyle: { color: '#52c41a' } },
-                      { value: 3, name: '进行中', itemStyle: { color: '#1890ff' } },
-                      { value: 2, name: '待执行', itemStyle: { color: '#faad14' } },
-                      { value: 1, name: '失败', itemStyle: { color: '#ff4d4f' } },
-                    ],
+              <div style={{ height: '300px', width: '100%' }}>
+                <ReactECharts
+                option={{
+                  tooltip: {
+                    trigger: 'item',
+                    formatter: '{a} <br/>{b}: {c} ({d}%)',
                   },
-                ],
-              }}
-              style={{ height: '300px' }}
-            />
+                  legend: {
+                    orient: 'vertical',
+                    left: 'left',
+                  },
+                  series: [
+                    {
+                      name: '任务状态',
+                      type: 'pie',
+                      radius: ['40%', '70%'],
+                      avoidLabelOverlap: false,
+                      itemStyle: {
+                        borderRadius: 10,
+                        borderColor: '#fff',
+                        borderWidth: 2,
+                      },
+                      label: {
+                        show: false,
+                        position: 'center',
+                      },
+                      emphasis: {
+                        label: {
+                          show: true,
+                          fontSize: 20,
+                          fontWeight: 'bold',
+                        },
+                      },
+                      labelLine: {
+                        show: false,
+                      },
+                      data: [
+                        { value: 15, name: '已完成', itemStyle: { color: '#52c41a' } },
+                        { value: 3, name: '进行中', itemStyle: { color: '#1890ff' } },
+                        { value: 2, name: '待执行', itemStyle: { color: '#faad14' } },
+                        { value: 1, name: '失败', itemStyle: { color: '#ff4d4f' } },
+                      ],
+                    },
+                  ],
+                }}
+                style={{ height: '100%', width: '100%' }}
+              />
+            </div>
             </Suspense>
           </Card>
         </Col>

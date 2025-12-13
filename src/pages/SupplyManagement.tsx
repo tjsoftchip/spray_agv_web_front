@@ -227,7 +227,7 @@ const SupplyManagement: React.FC = () => {
               value={supplyStatus.waterLevel}
               suffix="%"
               prefix={<ExperimentOutlined />}
-              valueStyle={{ color: getWaterColor(supplyStatus.waterLevel) }}
+              styles={{ content: { color: getWaterColor(supplyStatus.waterLevel) } }}
             />
             <Progress
               percent={supplyStatus.waterLevel}
@@ -247,7 +247,7 @@ const SupplyManagement: React.FC = () => {
               value={supplyStatus.batteryLevel}
               suffix="%"
               prefix={<ThunderboltOutlined />}
-              valueStyle={{ color: getBatteryColor(supplyStatus.batteryLevel) }}
+              styles={{ content: { color: getBatteryColor(supplyStatus.batteryLevel) } }}
             />
             <Progress
               percent={supplyStatus.batteryLevel}
