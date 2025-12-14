@@ -3,6 +3,59 @@
   height: 100%;
 }
 
+/* 全局样式重置和优化 */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+/* 登录页面响应式优化 */
+@media (min-width: 768px) {
+  .login-container {
+    padding: 40px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .login-container {
+    padding: 60px;
+  }
+}
+
+/* 卡片阴影效果优化 */
+.ant-card {
+  transition: all 0.3s ease;
+}
+
+.ant-card:hover {
+  transform: translateY(-2px);
+}
+
+/* 登录页面输入框样式优化 */
+.login-page .ant-input,
+.login-page .ant-input-password {
+  width: 100% !important;
+}
+
+.login-page .ant-form-item {
+  width: 100% !important;
+}
+
+.login-page .ant-form-item-control-input {
+  width: 100% !important;
+}
+
+.login-page .ant-form-item-control-input-content {
+  width: 100% !important;
+}
+
 .logo {
   height: 6em;
   padding: 1.5em;

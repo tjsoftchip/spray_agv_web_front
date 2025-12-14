@@ -40,26 +40,27 @@ const MapManagement: React.FC = () => {
   useEffect(() => {
     // 订阅地图数据
     socketService.on('ros_message', (data: any) => {
-      console.log('Received ROS message:', data.topic, data.msg ? 'has msg' : 'no msg');
+      // console.log('Received ROS message:', data.topic, data.msg ? 'has msg' : 'no msg');
       
       if (data.topic === '/map') {
-        console.log('Map data received:', data.msg ? 'has msg' : 'no msg');
         if (data.msg) {
-          console.log('Map data structure:', {
-            hasInfo: !!data.msg.info,
-            hasData: !!data.msg.data,
-            infoKeys: data.msg.info ? Object.keys(data.msg.info) : [],
-            dataType: typeof data.msg.data,
-            dataLength: data.msg.data ? (Array.isArray(data.msg.data) ? data.msg.data.length : 'not array') : 'no data'
-          });
           if (data.msg.info && data.msg.data) {
-            console.log('Map info:', data.msg.info);
-            console.log('Map data length:', data.msg.data.length);
-            console.log('Map data sample (first 10):', Array.isArray(data.msg.data) ? data.msg.data.slice(0, 10) : 'not array');
             setMapData(data.msg);
           } else {
             console.warn('Invalid map data structure:', data.msg);
           }
+        }
+      } else if (data.topic === '/point_cloud') {
+        // 处理点云数据
+        if (data.msg && data.msg.data) {
+          console.log('Point cloud received:', data.msg);
+          // 可以在这里添加点云处理逻辑
+        }
+      } else if (data.topic === '/scan_points') {
+        // 处理扫描点数据
+        if (data.msg && data.msg.points) {
+          console.log('Scan points received:', data.msg);
+          // 可以在这里添加扫描点处理逻辑
         }
       } else if (data.topic === '/robot_pose_k') {
         console.log('Robot pose received:', data.msg);
@@ -246,14 +247,18 @@ const MapManagement: React.FC = () => {
       return;
     }
     
-    // 缓存地图尺寸，避免抖动
-    const mapKey = `${width}x${height}`;
+    // 缓存地图尺寸和原点，避免抖动
+    // 使用四舍五入避免微小变化导致的频繁更新
+    const originX = Math.round(mapData.info.origin.position.x * 100) / 100;
+    const originY = Math.round(mapData.info.origin.position.y * 100) / 100;
+    const mapKey = `${width}x${height}_${originX}_${originY}`;
+    
     if (canvas.dataset.mapKey !== mapKey) {
       // 设置画布尺寸
       canvas.width = width;
       canvas.height = height;
       canvas.dataset.mapKey = mapKey;
-      console.log('Canvas size updated to:', { width, height });
+      console.log('Canvas size updated to:', { width, height, origin: { x: originX, y: originY } });
     }
     
     // 设置缩放
@@ -389,49 +394,55 @@ const MapManagement: React.FC = () => {
       robotX = (robotPose.pose.position.x - mapData.info.origin.position.x) / resolution;
       robotY = (robotPose.pose.position.y - mapData.info.origin.position.y) / resolution;
       hasValidPose = true;
-      console.log('Robot pose in world:', robotPose.pose.position.x, robotPose.pose.position.y);
-      console.log('Robot pose in map pixels (before flip):', robotX, robotY);
-      console.log('Map size:', width, 'x', height);
-      console.log('Map origin:', mapData.info.origin.position.x, mapData.info.origin.position.y);
-      console.log('Resolution:', resolution);
+      
+      // 减少日志输出，提高性能
+      if (Math.random() < 0.01) { // 只有1%的概率输出日志
+        console.log('Robot pose in world:', robotPose.pose.position.x, robotPose.pose.position.y);
+        console.log('Robot pose in map pixels:', robotX, robotY);
+      }
     } else {
-      console.log('Robot pose data missing, using default center position:', robotPose);
+      // 只在没有姿态数据时输出警告
+      if (!robotPose || !robotPose.pose || !robotPose.pose.position) {
+        console.log('Robot pose data missing, using default center position');
+      }
     }
     
-    // 确保机器人在地图范围内
-    robotX = Math.max(0, Math.min(width, robotX));
-    robotY = Math.max(0, Math.min(height, robotY));
+    // 不强制限制机器人在地图范围内，允许显示地图外的机器人
+    // 这样可以更好地观察建图过程中地图的扩展
     
     // 绘制机器人
     ctx.fillStyle = '#2196F3'; // 使用蓝色更接近地图应用中的车辆图标
     ctx.strokeStyle = '#1976D2'; // 深蓝色边框
     ctx.lineWidth = 2;
     
-    // 计算机器人朝向
+    // 直接使用robot_pose_publisher发布的位置和方向
     let robotYaw = 0; // 默认朝上
     if (hasValidPose && robotPose.pose.orientation) {
-      // 从四元数计算偏航角
+      // 从四元数计算偏航角（robot_pose_publisher已经处理了坐标系转换）
       const q = robotPose.pose.orientation;
       robotYaw = Math.atan2(
         2 * (q.w * q.z + q.x * q.y),
         1 - 2 * (q.y * q.y + q.z * q.z)
       );
-
-      // 机器人左右反转（水平翻转）
-      robotYaw = -robotYaw;
+      
+      console.log('Robot pose source: /robot_pose (from robot_pose_publisher)');
       console.log('Robot yaw (radians):', robotYaw);
       console.log('Robot yaw (degrees):', robotYaw * 180 / Math.PI);
     }
     
-    // 计算机器人在canvas上的显示位置
+    // 机器人位置在地图像素坐标系中的位置
     // 地图坐标系原点在左下角，canvas坐标系在左上角
     const canvasX = robotX;
-    const canvasY = height - 1 - robotY; // 翻转Y轴以匹配地图坐标系，-1因为索引从0开始
+    const canvasY = height - 1 - robotY; // 翻转Y轴以匹配地图坐标系
     
-    // 应用地图变换：上下翻转 + 向左旋转90度
+    // 应用与地图相同的变换：上下翻转 + 向左旋转90度（匹配RViz显示）
     // 变换公式：(x, y) → (height - 1 - y, x)
     const canvasX_transformed = height - 1 - canvasY;
     const canvasY_transformed = canvasX;
+    
+    // 调整机器人朝角以匹配地图变换
+    // 向左旋转90度意味着机器人显示角度也需要相应调整
+    const robotYaw_transformed = robotYaw - Math.PI / 2;
     
     console.log('Robot position in world:', robotPose?.pose?.position?.x, robotPose?.pose?.position?.y);
     console.log('Robot position in map pixels:', robotX, robotY);
@@ -447,7 +458,7 @@ const MapManagement: React.FC = () => {
     
     ctx.save();
     ctx.translate(canvasX_transformed, canvasY_transformed);
-    ctx.rotate(robotYaw);
+    ctx.rotate(robotYaw_transformed);
     
     // 绘制机器人箭头（绿色）
     ctx.beginPath();
@@ -474,13 +485,11 @@ const MapManagement: React.FC = () => {
     // 添加调试信息
     console.log('Robot drawn at:', canvasX_transformed, canvasY_transformed, 'size:', robotDisplaySize);
     console.log('Robot yaw (degrees):', robotYaw * 180 / Math.PI);
+    console.log('Robot yaw transformed (degrees):', robotYaw_transformed * 180 / Math.PI);
     console.log('Robot visible on canvas:', canvasX_transformed >= 0 && canvasX_transformed <= width && canvasY_transformed >= 0 && canvasY_transformed <= height);
     
     console.log('Robot drawn at canvas position:', canvasX_transformed, canvasY_transformed, 'size:', robotDisplaySize);
-    
-    // 恢复画布状态
-    ctx.restore();
-  }, [mapData?.info?.width, mapData?.info?.height, mapData?.data?.slice(0, 100), robotPose, scale, offset]);
+  }, [mapData?.info?.width, mapData?.info?.height, mapData?.info?.origin?.position?.x, mapData?.info?.origin?.position?.y, mapData?.data?.slice(0, 100), robotPose, scale, offset]);
 
   const loadMaps = async () => {
     setLoading(true);
@@ -496,84 +505,131 @@ const MapManagement: React.FC = () => {
 
   const checkMappingStatus = async () => {
     try {
-      // 首先尝试通过API服务获取状态
-      const token = localStorage.getItem('token');
-      if (token) {
-        try {
-          const response = await fetch(`${window.location.protocol}//${window.location.hostname}:3000/api/maps/mapping-status`, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          
-          if (response.ok) {
-            const status = await response.json();
-            console.log('Mapping status response:', status);
-            if (status.isMapping) {
-              setMappingStatus('mapping');
-              return;
-            } else {
-              setMappingStatus('idle');
-              return;
-            }
-          }
-        } catch (error) {
-          console.log('API request failed, trying local endpoint');
-        }
-      }
+      // 使用mapApi获取状态
+      const response = await mapApi.getMappingStatusLocal();
+      console.log('Mapping status response:', response);
       
-      // 备选方案：使用本地状态检查端点
-      const localResponse = await fetch(`${window.location.protocol}//${window.location.hostname}:3000/api/maps/mapping-status-local`);
-      if (localResponse.ok) {
-        const status = await localResponse.json();
-        console.log('Local mapping status:', status);
-        if (status.isMapping) {
-          setMappingStatus('mapping');
-        } else {
-          setMappingStatus('idle');
-        }
-      } else {
-        console.log('Local endpoint also failed');
+      // 只有在明确收到 isMapping: false 时才设置为 idle
+      // 避免因网络错误导致的误判
+      if (response && response.isMapping === true) {
+        setMappingStatus('mapping');
+      } else if (response && response.isMapping === false) {
         setMappingStatus('idle');
       }
+      // 如果响应为空或格式不正确，保持当前状态不变
     } catch (error) {
       console.error('Failed to check mapping status:', error);
-      setMappingStatus('idle');
+      // 网络错误时不改变状态，避免误判
     }
   };
 
   const handleStartMapping = async () => {
     try {
-      await mapApi.startMapping();
+      // 先设置为建图状态，提供即时反馈
       setMappingStatus('mapping');
+      
+      // 调用本地建图API
+      await mapApi.startMappingLocal();
+      
+      // 延迟1秒后再检查状态，确保后端状态已更新
+      setTimeout(() => {
+        checkMappingStatus();
+      }, 1000);
+      
       message.success('开始建图');
     } catch (error: any) {
+      console.error('启动建图失败:', error);
+      // 恢复为空闲状态
+      setMappingStatus('idle');
       message.error('启动建图失败');
     }
   };
 
   const handleStopMapping = async () => {
     try {
-      await mapApi.stopMapping();
-      setMappingStatus('idle');
+      // 先显示保存对话框，让用户输入地图名称
       setSaveModalVisible(true);
     } catch (error: any) {
+      console.error('停止建图失败:', error);
       message.error('停止建图失败');
+    }
+  };
+
+  const handleStopAndSaveMapping = async (mapName: string) => {
+    try {
+      // 先调用保存地图API
+      message.loading('正在保存地图，请稍候...', 0);
+      console.log('开始保存地图:', mapName);
+      
+      await mapApi.saveMapLocal({ mapName });
+      
+      // 等待一段时间确保地图保存完成
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      message.destroy(); // 关闭loading
+      message.success('地图保存成功');
+      
+      // 然后停止建图节点
+      console.log('开始停止建图节点...');
+      await mapApi.stopMappingLocal();
+      
+      setMappingStatus('idle');
+      message.success('建图已停止并保存成功');
+      setSaveModalVisible(false);
+      // 重新加载地图列表
+      loadMaps();
+    } catch (error: any) {
+      message.destroy(); // 关闭loading
+      console.error('停止并保存建图失败:', error);
+      message.error('停止并保存建图失败');
+      // 如果保存失败，提供强制停止选项
+      Modal.confirm({
+        title: '保存地图失败',
+        content: '保存地图失败，是否强制停止建图？（强制停止将不会保存地图）',
+        onOk: async () => {
+          try {
+            await mapApi.stopMappingLocal();
+            setMappingStatus('idle');
+            message.success('已强制停止建图');
+            setSaveModalVisible(false);
+          } catch (forceError: any) {
+            message.error('强制停止建图也失败');
+          }
+        }
+      });
+    }
+  };
+
+  const handleForceStopMapping = async () => {
+    try {
+      await mapApi.forceStopMapping();
+      setMappingStatus('idle');
+      message.success('已强制停止建图');
+      setSaveModalVisible(false);
+    } catch (error: any) {
+      message.error('强制停止建图失败');
     }
   };
 
   const handleSaveMap = async () => {
     try {
       const values = await form.validateFields();
-      await mapApi.saveMap(values.name);
+      // 先保存地图
+      await mapApi.saveMapLocal({ mapName: values.name });
       message.success('地图保存成功');
+      
+      // 然后停止建图
+      await mapApi.stopMappingLocal();
+      setMappingStatus('idle');
+      message.success('建图已停止');
+      
       setSaveModalVisible(false);
       form.resetFields();
+      
+      // 重新加载地图列表
       loadMaps();
     } catch (error: any) {
-      message.error('保存地图失败');
+      message.error('保存地图或停止建图失败');
     }
   };
 
@@ -849,19 +905,44 @@ const MapManagement: React.FC = () => {
       </Row>
 
       <Modal
-        title="保存地图"
+        title="退出建图"
         open={saveModalVisible}
-        onOk={handleSaveMap}
         onCancel={() => {
           setSaveModalVisible(false);
           form.resetFields();
         }}
+        footer={[
+          <Button key="cancel" onClick={() => {
+            setSaveModalVisible(false);
+            form.resetFields();
+          }}>
+            取消
+          </Button>,
+          <Button key="nosave" onClick={async () => {
+            try {
+              console.log('用户选择不保存，直接停止建图节点');
+              await mapApi.stopMappingLocal();
+              setMappingStatus('idle');
+              message.success('已退出建图（未保存）');
+              setSaveModalVisible(false);
+              form.resetFields();
+            } catch (error: any) {
+              console.error('退出建图失败:', error);
+              message.error('退出建图失败');
+            }
+          }}>
+            不保存退出
+          </Button>,
+          <Button key="save" type="primary" onClick={handleSaveMap}>
+            保存并退出
+          </Button>,
+        ]}
       >
         <Form form={form} layout="vertical">
           <Form.Item
             name="name"
-            label="地图名称"
-            rules={[{ required: true, message: '请输入地图名称' }]}
+            label="地图名称（保存时需要）"
+            rules={[{ required: false, message: '请输入地图名称' }]}
           >
             <Input placeholder="例如: 一号梁场地图" />
           </Form.Item>

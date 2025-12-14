@@ -149,10 +149,16 @@ export const mapApi = {
   getActiveMap: () => apiService.get('/maps/active'),
   setActiveMap: (id: string) => apiService.put(`/maps/${id}/active`),
   startMapping: () => apiService.post('/maps/start-mapping'),
-  stopMapping: () => apiService.post('/maps/stop-mapping'),
+  stopMapping: (data?: any) => apiService.post('/maps/stop-mapping', data),
+  forceStopMapping: () => apiService.post('/maps/force-stop-mapping'),
   saveMap: (name: string) => apiService.post('/maps/save', { name }),
   loadMap: (id: string) => apiService.post(`/maps/${id}/load`),
   deleteMap: (id: string) => apiService.delete(`/maps/${id}`),
+  // 本地API方法（不需要认证）
+  getMappingStatusLocal: () => apiService.get('/maps/mapping-status-local'),
+  startMappingLocal: () => apiService.post('/maps/start-mapping-local'),
+  stopMappingLocal: () => apiService.post('/maps/stop-mapping-local'),
+  saveMapLocal: (data: any) => apiService.post('/maps/save-local', data),
 };
 
 export const scheduleApi = {

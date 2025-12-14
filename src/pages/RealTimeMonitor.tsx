@@ -1,8 +1,9 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, lazy, Suspense, useRef } from 'react';
 import { Card, Row, Col, Statistic, Progress, Tag } from 'antd';
 import { ThunderboltOutlined, DashboardOutlined, DropboxOutlined } from '@ant-design/icons';
 import MapViewer from '../components/MapViewer';
 import Loading from '../components/Loading';
+import { socketService } from '../services/socket';
 
 const ReactECharts = lazy(() => import('echarts-for-react'));
 
@@ -10,8 +11,11 @@ const RealTimeMonitor: React.FC = () => {
   const [robotPosition, setRobotPosition] = useState({ x: 0, y: 0 });
   const [batteryLevel, setBatteryLevel] = useState(85);
   const [waterLevel, setWaterLevel] = useState(70);
-  const [speed] = useState(0.35);
+  const [speed, setSpeed] = useState(0);
   const [taskStatus] = useState<'idle' | 'running' | 'paused'>('idle');
+  const socketConnectedRef = useRef(false);
+  const speedHistoryRef = useRef<number[]>([]); // 速度历史记录
+  const lastValidSpeedRef = useRef(0); // 上次有效速度
 
   const mockNavigationPoints = [
     {
@@ -51,16 +55,72 @@ const RealTimeMonitor: React.FC = () => {
   ];
 
   useEffect(() => {
+    // 连接Socket服务
+    socketService.connect();
+    socketConnectedRef.current = true;
+
+    // 订阅odom_raw话题获取真实速度（避免EKF滤波器的噪声）
+    const subscribeToOdom = () => {
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/odom_raw',
+        type: 'nav_msgs/Odometry'
+      });
+    };
+
+    // 监听ROS消息
+    const handleRosMessage = (data: any) => {
+      if (data.topic === '/odom_raw' && data.msg) {
+        // 从odom消息中提取速度信息
+        const linearVel = data.msg.twist?.twist?.linear?.x || 0;
+        const angularVel = data.msg.twist?.twist?.angular?.z || 0;
+        
+        // 计算合速度 (线速度的绝对值)
+        const rawSpeed = Math.abs(linearVel);
+        const filteredSpeed = filterSpeed(rawSpeed);
+        setSpeed(filteredSpeed);
+
+        // 更新机器人位置
+        const position = data.msg.pose?.pose?.position;
+        if (position) {
+          setRobotPosition({
+            x: position.x || 0,
+            y: position.y || 0
+          });
+        }
+        
+        // 添加调试日志
+        console.log('Odom data received:', {
+          linearVel,
+          angularVel,
+          rawSpeed,
+          filteredSpeed,
+          position: position ? { x: position.x, y: position.y } : null
+        });
+      }
+    };
+
+    socketService.onRosMessage(handleRosMessage);
+    subscribeToOdom();
+
     const interval = setInterval(() => {
-      setRobotPosition((prev) => ({
-        x: prev.x + 0.00001,
-        y: prev.y + 0.00001,
-      }));
       setBatteryLevel((prev) => Math.max(0, prev - 0.1));
       setWaterLevel((prev) => Math.max(0, prev - 0.15));
     }, 1000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (socketConnectedRef.current) {
+        socketService.off('ros_message', handleRosMessage);
+        // 取消订阅odom_raw话题
+        socketService.sendRosCommand({
+          op: 'unsubscribe',
+          topic: '/odom_raw'
+        });
+        socketService.disconnect();
+        socketConnectedRef.current = false;
+      }
+    };
   }, []);
 
   const getStatusColor = (status: string) => {
@@ -79,6 +139,32 @@ const RealTimeMonitor: React.FC = () => {
       paused: '已暂停',
     };
     return texts[status] || status;
+  };
+
+  // 速度滤波函数：死区滤波 + 移动平均
+  const filterSpeed = (rawSpeed: number): number => {
+    const DEADZONE_THRESHOLD = 0.02; // 死区阈值：小于0.02m/s认为是噪声
+    const HISTORY_SIZE = 5; // 移动平均窗口大小
+    
+    // 死区滤波：小于阈值的速度认为是噪声
+    if (Math.abs(rawSpeed) < DEADZONE_THRESHOLD) {
+      return 0;
+    }
+    
+    // 移动平均滤波
+    speedHistoryRef.current.push(rawSpeed);
+    if (speedHistoryRef.current.length > HISTORY_SIZE) {
+      speedHistoryRef.current.shift();
+    }
+    
+    const avgSpeed = speedHistoryRef.current.reduce((sum, s) => sum + s, 0) / speedHistoryRef.current.length;
+    
+    // 如果平均速度小于阈值，返回0
+    if (Math.abs(avgSpeed) < DEADZONE_THRESHOLD) {
+      return 0;
+    }
+    
+    return avgSpeed;
   };
 
   return (

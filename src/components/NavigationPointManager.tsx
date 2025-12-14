@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Popconfirm } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Popconfirm, Row, Col } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, EnvironmentOutlined, AimOutlined } from '@ant-design/icons';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import MapViewer from './MapViewer';
+import PGMMapViewer from './PGMMapViewer';
+import { apiService } from '../services/api';
 
 interface NavigationPointManagerProps {
   templateId: string;
@@ -11,11 +12,28 @@ interface NavigationPointManagerProps {
   onUpdate: () => void;
 }
 
-const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ navigationPoints, onUpdate }) => {
+const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templateId, navigationPoints, onUpdate }) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [mapSelectVisible, setMapSelectVisible] = useState(false);
   const [editingPoint, setEditingPoint] = useState<any>(null);
+  const [selectedMapId, setSelectedMapId] = useState<string>('');
+  const [robotPosition, setRobotPosition] = useState<{ x: number; y: number } | null>(null);
+  const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
+
+  useEffect(() => {
+    // 可以在这里加载默认地图或机器人位置
+    loadRobotPosition();
+  }, []);
+
+  const loadRobotPosition = async () => {
+    try {
+      const data = await apiService.get('/templates/robot/current-position');
+      setRobotPosition(data.position);
+    } catch (error) {
+      console.error('Failed to load robot position:', error);
+    }
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -42,28 +60,71 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ navigat
     setModalVisible(true);
   };
 
-  const handleDelete = async (_id: string) => {
-    message.success('删除成功');
-    onUpdate();
+  const handleDelete = async (id: string) => {
+    try {
+      const response = await fetch(`/api/templates/${templateId}/navigation-points/${id}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        message.success('删除成功');
+        onUpdate();
+      } else {
+        throw new Error('Delete failed');
+      }
+    } catch (error) {
+      message.error('删除失败');
+    }
   };
 
   const handleSubmit = async () => {
     try {
-      await form.validateFields();
-      message.success(editingPoint ? '更新成功' : '创建成功');
-      setModalVisible(false);
-      onUpdate();
-    } catch (error: any) {
+      setLoading(true);
+      const values = await form.validateFields();
+      
+      let response;
+      if (editingPoint) {
+        response = await fetch(`/api/templates/${templateId}/navigation-points/${editingPoint.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(values),
+        });
+      } else {
+        response = await fetch(`/api/templates/${templateId}/navigation-points`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(values),
+        });
+      }
+      
+      if (response.ok) {
+        message.success(editingPoint ? '更新成功' : '创建成功');
+        setModalVisible(false);
+        onUpdate();
+      } else {
+        throw new Error('Save failed');
+      }
+    } catch (error) {
       message.error('操作失败');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleGetCurrentPosition = () => {
-    message.info('获取当前机器人位置...');
-    form.setFieldsValue({
-      position: { x: 10.5, y: 20.3, z: 0 },
-      orientation: { x: 0, y: 0, z: 0.5, w: 0.866 },
-    });
+  const handleGetCurrentPosition = async () => {
+    try {
+      const data = await apiService.get('/templates/robot/current-position');
+      
+      form.setFieldsValue({
+        position: data.position,
+        orientation: data.orientation,
+      });
+      
+      setRobotPosition(data.position);
+      message.success('已获取当前机器人位置');
+    } catch (error) {
+      message.error('获取当前位置失败');
+    }
   };
 
   const handleMapSelect = () => {
@@ -71,11 +132,36 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ navigat
   };
 
   const handleMapClick = (position: { x: number; y: number }) => {
+    // 确保坐标是有效的数字
+    const x = typeof position.x === 'number' && !isNaN(position.x) ? position.x : 0;
+    const y = typeof position.y === 'number' && !isNaN(position.y) ? position.y : 0;
+    
+    console.log('Setting position from map click:', { x, y, originalPosition: position });
+    
     form.setFieldsValue({
-      position: { x: position.x, y: position.y, z: 0 },
+      position: { x, y, z: 0 },
     });
     setMapSelectVisible(false);
-    message.success('位置已设置');
+    message.success(`位置已设置: (${x.toFixed(2)}, ${y.toFixed(2)})`);
+  };
+
+  const handleReorder = async (pointIds: string[]) => {
+    try {
+      const response = await fetch(`/api/templates/${templateId}/navigation-points/reorder`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pointIds }),
+      });
+      
+      if (response.ok) {
+        message.success('顺序已更新');
+        onUpdate();
+      } else {
+        throw new Error('Reorder failed');
+      }
+    } catch (error) {
+      message.error('更新顺序失败');
+    }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -83,12 +169,13 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ navigat
     if (over && active.id !== over.id) {
       const oldIndex = navigationPoints.findIndex((p) => p.id === active.id);
       const newIndex = navigationPoints.findIndex((p) => p.id === over.id);
-      arrayMove(navigationPoints, oldIndex, newIndex).map((p, index) => ({
+      const reorderedPoints = arrayMove(navigationPoints, oldIndex, newIndex).map((p, index) => ({
         ...p,
         order: index + 1,
       }));
-      message.success('顺序已更新');
-      onUpdate();
+      
+      const pointIds = reorderedPoints.map(p => p.id);
+      handleReorder(pointIds);
     }
   };
 
@@ -177,7 +264,8 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ navigat
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
-        width={700}
+        confirmLoading={loading}
+        width={800}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -200,38 +288,68 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ navigat
             </Select>
           </Form.Item>
 
-          <Form.Item label="位置设置">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Button 
-                icon={<EnvironmentOutlined />} 
-                onClick={handleGetCurrentPosition}
-                block
-              >
-                获取当前机器人位置
-              </Button>
-              <Button 
-                icon={<AimOutlined />} 
-                onClick={handleMapSelect}
-                block
-              >
-                地图点选位置
-              </Button>
-              
-              <Space>
-                <Form.Item name={['position', 'x']} label="X" rules={[{ required: true }]}>
-                  <InputNumber placeholder="X坐标" step={0.1} />
-                </Form.Item>
-                <Form.Item name={['position', 'y']} label="Y" rules={[{ required: true }]}>
-                  <InputNumber placeholder="Y坐标" step={0.1} />
-                </Form.Item>
-                <Form.Item name={['position', 'z']} label="Z" rules={[{ required: true }]}>
-                  <InputNumber placeholder="Z坐标" step={0.1} />
-                </Form.Item>
-              </Space>
-            </Space>
+          <Form.Item label="位置设置方式">
+            <Row gutter={8}>
+              <Col span={12}>
+                <Button 
+                  icon={<EnvironmentOutlined />} 
+                  onClick={handleGetCurrentPosition}
+                  block
+                >
+                  获取当前位置
+                </Button>
+              </Col>
+              <Col span={12}>
+                <Button 
+                  icon={<AimOutlined />} 
+                  onClick={handleMapSelect}
+                  block
+                >
+                  地图点选
+                </Button>
+              </Col>
+            </Row>
           </Form.Item>
 
-          <Form.Item label="朝向(四元数)">
+          <Form.Item label="坐标位置">
+            <Row gutter={8}>
+              <Col span={8}>
+                <Form.Item name={['position', 'x']} rules={[{ required: true, message: '请输入X坐标' }]}>
+                  <InputNumber 
+                    placeholder="X坐标" 
+                    step={0.1} 
+                    style={{ width: '100%' }}
+                    size="large"
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={['position', 'y']} rules={[{ required: true, message: '请输入Y坐标' }]}>
+                  <InputNumber 
+                    placeholder="Y坐标" 
+                    step={0.1} 
+                    style={{ width: '100%' }}
+                    size="large"
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={['position', 'z']} rules={[{ required: true, message: '请输入Z坐标' }]}>
+                  <InputNumber 
+                    placeholder="Z坐标" 
+                    step={0.1} 
+                    style={{ width: '100%' }}
+                    size="large"
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form.Item>
+
+          <Form.Item 
+            label="朝向(四元数)"
+            extra="四元数表示机器人的朝向，X/Y/Z为旋转轴分量，W为旋转角度分量。通常保持X=Y=0，Z和W满足 Z²+W²=1。例如：朝东(0,0,0,1)，朝北(0,0,0.707,0.707)，朝西(0,0,1,0)，朝南(0,0,-0.707,0.707)"
+          >
             <Space>
               <Form.Item name={['orientation', 'x']} noStyle>
                 <InputNumber placeholder="X" step={0.1} style={{ width: 100 }} />
@@ -259,11 +377,13 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ navigat
         open={mapSelectVisible}
         onCancel={() => setMapSelectVisible(false)}
         footer={null}
-        width={800}
+        width={1000}
       >
-        <MapViewer
+        <PGMMapViewer
           navigationPoints={navigationPoints}
           onMapClick={handleMapClick}
+          robotPosition={robotPosition}
+          height="600px"
         />
       </Modal>
     </Card>

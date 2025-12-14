@@ -9,7 +9,7 @@ const getWsUrl = (): string => {
   
   // 使用当前页面的主机地址，确保跨设备访问
   const hostname = window.location.hostname;
-  const port = hostname === 'localhost' || hostname === '127.0.0.1' ? '3000' : '3000';
+  const port = '3000';
   return `${window.location.protocol}//${hostname}:${port}`;
 };
 
@@ -17,36 +17,122 @@ const WS_URL = getWsUrl();
 
 class SocketService {
   private socket: Socket | null = null;
+  private connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting' = 'disconnected';
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 10;
+  private reconnectDelay = 1000;
 
   public connect(): void {
     if (this.socket?.connected) {
       return;
     }
 
+    this.connectionStatus = 'connecting';
+    console.log('Connecting to WebSocket server...');
+
     this.socket = io(WS_URL, {
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'], // 添加polling作为备用传输方式
       reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 5,
+      reconnectionDelay: this.reconnectDelay,
+      reconnectionAttempts: this.maxReconnectAttempts,
+      timeout: 20000, // 增加超时时间
+      forceNew: true, // 强制创建新连接
+      autoConnect: true
     });
 
     this.socket.on('connect', () => {
-      console.log('Socket connected');
+      console.log('Socket connected successfully');
+      this.connectionStatus = 'connected';
+      this.reconnectAttempts = 0;
+      
+      // 连接成功后，尝试切换回websocket
+      if (this.socket?.io.opts.transports.includes('polling')) {
+        console.log('Attempting to switch back to WebSocket...');
+        this.socket.io.opts.transports = ['websocket', 'polling'];
+      }
     });
 
-    this.socket.on('disconnect', () => {
-      console.log('Socket disconnected');
+    this.socket.on('disconnect', (reason) => {
+      console.log('Socket disconnected, reason:', reason);
+      this.connectionStatus = 'disconnected';
+      
+      // 根据断开原因决定是否自动重连
+      if (reason === 'io server disconnect') {
+        // 服务器主动断开，需要手动重连
+        console.log('Server disconnected, attempting to reconnect...');
+        this.socket?.connect();
+      } else if (reason === 'ping timeout' || reason === 'transport close') {
+        // 网络问题，自动重连
+        console.log('Network issue, will auto-reconnect...');
+      }
     });
 
     this.socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
+      this.connectionStatus = 'reconnecting';
+      this.reconnectAttempts++;
+      
+      // 如果是WebSocket连接失败，尝试使用polling
+      if (this.socket && this.reconnectAttempts > 2) {
+        console.log('WebSocket failed, switching to polling transport...');
+        this.socket.io.opts.transports = ['polling'];
+      }
+      
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        console.error('Max reconnection attempts reached');
+        this.connectionStatus = 'disconnected';
+      }
     });
+
+    this.socket.on('reconnect', (attemptNumber) => {
+      console.log(`Socket reconnected after ${attemptNumber} attempts`);
+      this.connectionStatus = 'connected';
+      this.reconnectAttempts = 0;
+    });
+
+    this.socket.on('reconnect_attempt', (attemptNumber) => {
+      console.log(`Reconnection attempt ${attemptNumber}`);
+      this.connectionStatus = 'reconnecting';
+    });
+
+    this.socket.on('reconnect_failed', () => {
+      console.error('Failed to reconnect after all attempts');
+      this.connectionStatus = 'disconnected';
+    });
+  }
+
+  public getConnectionStatus(): string {
+    return this.connectionStatus;
   }
 
   public disconnect(): void {
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
+      this.connectionStatus = 'disconnected';
+      this.reconnectAttempts = 0;
+    }
+  }
+
+  // 发送心跳
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+  
+  public startHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+    
+    this.heartbeatInterval = setInterval(() => {
+      if (this.socket?.connected) {
+        this.socket.emit('ping');
+      }
+    }, 30000); // 每30秒发送一次心跳
+  }
+  
+  public stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
     }
   }
 

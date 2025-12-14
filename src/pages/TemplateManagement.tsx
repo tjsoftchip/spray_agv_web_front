@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Popconfirm, Card, Tabs } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Popconfirm, Card, Tabs, Row, Col } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, ArrowLeftOutlined, EnvironmentOutlined } from '@ant-design/icons';
 import { templateApi } from '../services/api';
 import NavigationPointManager from '../components/NavigationPointManager';
 import RoadSegmentManager from '../components/RoadSegmentManager';
-import MapViewer from '../components/MapViewer';
+import PGMMapViewer from '../components/PGMMapViewer';
 
 const { TextArea } = Input;
 
@@ -14,11 +14,23 @@ const TemplateManagement: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<any>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
+  const [maps, setMaps] = useState<any[]>([]);
   const [form] = Form.useForm();
 
   useEffect(() => {
     loadTemplates();
+    loadMaps();
   }, []);
+
+  const loadMaps = async () => {
+    try {
+      const response = await fetch('/api/maps/scan-local');
+      const data = await response.json();
+      setMaps(data);
+    } catch (error) {
+      console.error('Failed to load maps:', error);
+    }
+  };
 
   const loadTemplates = async () => {
     setLoading(true);
@@ -189,9 +201,12 @@ const TemplateManagement: React.FC = () => {
                       <p><strong>状态：</strong>{selectedTemplate.isActive ? '启用' : '禁用'}</p>
                     </Card>
                     <Card size="small" title="路径预览">
-                      <MapViewer
+                      <PGMMapViewer
                         navigationPoints={selectedTemplate.navigationPoints || []}
                         roadSegments={selectedTemplate.roadSegments || []}
+                        selectedMapId={selectedTemplate.defaultMapId}
+                        showMapSelector={false}
+                        height="400px"
                       />
                     </Card>
                   </Space>
@@ -313,6 +328,16 @@ const TemplateManagement: React.FC = () => {
                 <InputNumber placeholder="宽度(米)" min={1} />
               </Form.Item>
             </Space>
+          </Form.Item>
+
+          <Form.Item name="defaultMapId" label="默认地图">
+            <Select placeholder="选择默认地图" allowClear>
+              {maps.map(map => (
+                <Select.Option key={map.name} value={map.name}>
+                  {map.name} ({map.width}x{map.height}, 分辨率: {map.resolution})
+                </Select.Option>
+              ))}
+            </Select>
           </Form.Item>
 
           <Form.Item name="version" label="版本" initialValue="1.0">

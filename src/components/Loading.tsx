@@ -27,19 +27,21 @@ const Loading: React.FC<LoadingProps> = ({
     );
   }
 
-  const spinContent = <Spin indicator={antIcon} size={size} tip={fullscreen ? tip : undefined} />;
-
   if (fullscreen) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        width: '100%',
-      }}>
-        {spinContent}
-      </div>
+      <Spin 
+        indicator={antIcon} 
+        size={size} 
+        tip={tip}
+      >
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '100vh',
+          width: '100%',
+        }} />
+      </Spin>
     );
   }
 
@@ -51,7 +53,7 @@ const Loading: React.FC<LoadingProps> = ({
       padding: '40px 0',
       width: '100%',
     }}>
-      {spinContent}
+      <Spin indicator={antIcon} size={size} />
     </div>
   );
 };
