@@ -55,6 +55,7 @@ const MapManagement: React.FC = () => {
           if (data.msg.info && data.msg.data) {
             console.log('Map info:', data.msg.info);
             console.log('Map data length:', data.msg.data.length);
+            console.log('Map data sample (first 10):', Array.isArray(data.msg.data) ? data.msg.data.slice(0, 10) : 'not array');
             setMapData(data.msg);
           } else {
             console.warn('Invalid map data structure:', data.msg);
@@ -95,39 +96,75 @@ const MapManagement: React.FC = () => {
           });
           
           // 查找正确的TF变换
-          const mapToOdom = data.msg.transforms.find((t: any) => 
+          const allTransforms = data.msg.transforms;
+          
+          // 打印所有可用的TF变换
+          console.log('Available TF transforms:');
+          allTransforms.forEach((t: any) => {
+            console.log(`  ${t.header.frame_id} -> ${t.child_frame_id}`);
+          });
+          
+          // 查找 map -> odom -> base_footprint 的变换链
+          const mapToOdom = allTransforms.find((t: any) => 
             t.header.frame_id === 'map' && t.child_frame_id === 'odom'
           );
-          
-          const odomToBaseFootprint = data.msg.transforms.find((t: any) => 
+          const odomToBase = allTransforms.find((t: any) => 
             t.header.frame_id === 'odom' && t.child_frame_id === 'base_footprint'
           );
           
-          if (mapToOdom && odomToBaseFootprint) {
-            // 组合变换：map -> odom -> base_footprint
-            // 简化处理：将odom->base_footprint的位置加上map->odom的偏移
-            const mapX = mapToOdom.transform.translation.x + odomToBaseFootprint.transform.translation.x;
-            const mapY = mapToOdom.transform.translation.y + odomToBaseFootprint.transform.translation.y;
+          if (mapToOdom && odomToBase) {
+            // 组合变换计算机器人在地图中的位置
+            const mapX = mapToOdom.transform.translation.x + odomToBase.transform.translation.x;
+            const mapY = mapToOdom.transform.translation.y + odomToBase.transform.translation.y;
             
-            // 组合四元数（简化处理）
+            // 组合四元数计算朝向
+            const q1 = mapToOdom.transform.rotation;
+            const q2 = odomToBase.transform.rotation;
+            
+            // 四元数乘法（简化版本）
+            const qw = q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z;
+            const qx = q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y;
+            const qy = q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x;
+            const qz = q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w;
+            
+            // 计算偏航角
+            const yaw = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz));
+            
             const tfPose = {
-              header: {
-                stamp: mapToOdom.header.stamp,
-                frame_id: 'map'
-              },
+              header: mapToOdom.header,
               pose: {
-                position: {
-                  x: mapX,
-                  y: mapY,
-                  z: 0
-                },
-                orientation: odomToBaseFootprint.transform.rotation
+                position: { x: mapX, y: mapY, z: 0 },
+                orientation: { x: qx, y: qy, z: qz, w: qw }
               }
             };
-            console.log('Using combined tf data as robot pose:', tfPose);
+            
+            console.log('TF pose calculated:', tfPose);
+            console.log('TF yaw (degrees):', yaw * 180 / Math.PI);
             setRobotPose(tfPose);
           } else {
-            console.log('Missing TF transforms. Found map->odom:', !!mapToOdom, 'odom->base_footprint:', !!odomToBaseFootprint);
+            // 尝试查找 map -> base_footprint 直接变换
+            const mapToBase = allTransforms.find((t: any) => 
+              t.header.frame_id === 'map' && t.child_frame_id === 'base_footprint'
+            );
+            
+            if (mapToBase) {
+              console.log('Using direct map -> base_footprint transform');
+              const tfPose = {
+                header: mapToBase.header,
+                pose: {
+                  position: mapToBase.transform.translation,
+                  orientation: mapToBase.transform.rotation
+                }
+              };
+              
+              const q = mapToBase.transform.rotation;
+              const yaw = Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * qz));
+              console.log('Direct TF yaw (degrees):', yaw * 180 / Math.PI);
+              
+              setRobotPose(tfPose);
+            } else {
+              console.log('No suitable TF transforms found');
+            }
           }
         }
       } else if (data.topic === '/tf_static') {
@@ -189,6 +226,10 @@ const MapManagement: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
+    // 设置canvas样式以便调试
+    canvas.style.border = '2px solid red';
+    canvas.style.backgroundColor = '#f0f0f0';
+    
     // 安全检查：确保mapData.info和data存在
     if (!mapData.info || !mapData.data) {
       console.warn('Map data structure is incomplete:', mapData);
@@ -208,13 +249,23 @@ const MapManagement: React.FC = () => {
     // 缓存地图尺寸，避免抖动
     const mapKey = `${width}x${height}`;
     if (canvas.dataset.mapKey !== mapKey) {
-      // 只在地图尺寸改变时更新canvas尺寸
+      // 设置画布尺寸
       canvas.width = width;
       canvas.height = height;
       canvas.dataset.mapKey = mapKey;
       console.log('Canvas size updated to:', { width, height });
     }
     
+    // 设置缩放
+    const finalScale = scale * resolution;
+    
+    // 添加调试信息
+    console.log('Canvas setup:');
+    console.log('  Canvas width:', canvas.width);
+    console.log('  Canvas height:', canvas.height);
+    console.log('  Canvas style width:', canvas.style.width);
+    console.log('  Canvas style height:', canvas.style.height);
+    console.log('  Final scale:', finalScale);    
     // 计算合适的显示尺寸
     const maxDisplayWidth = 800;
     const maxDisplayHeight = 600;
@@ -231,11 +282,11 @@ const MapManagement: React.FC = () => {
     );
     
     // 应用用户缩放
-    const finalScale = baseScale * scale;
+    const adjustedScale = baseScale * scale;
     
     // 最终显示尺寸（像素）
-    const displayWidth = mapWidthMeters * finalScale;
-    const displayHeight = mapHeightMeters * finalScale;
+    const displayWidth = mapWidthMeters * adjustedScale;
+    const displayHeight = mapHeightMeters * adjustedScale;
     
     // 设置canvas显示尺寸和居中（只在尺寸改变时更新）
     const containerWidth = canvas.parentElement?.clientWidth || maxDisplayWidth;
@@ -262,12 +313,23 @@ const MapManagement: React.FC = () => {
     ctx.fillRect(0, 0, width, height);
     
     // 绘制地图网格
-    if (gridData.length === width * height) {
-      const imageData = ctx.createImageData(width, height);
-      let knownPixels = 0;
-      
-      for (let i = 0; i < gridData.length; i++) {
+    console.log('Drawing map with data length:', gridData.length);
+    console.log('Expected data length:', width * height);
+    console.log('Map resolution:', resolution);
+    console.log('Map dimensions:', width, 'x', height);
+    console.log('Map origin:', mapData.info.origin.position.x, mapData.info.origin.position.y);
+    console.log('Grid data sample:', gridData.slice(0, 20));
+    
+    // 创建图像数据（默认方向，不旋转）
+    const mapImageData = ctx.createImageData(width, height);
+    let knownPixels = 0;
+    
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        // 地图数据是行优先存储的
+        const i = y * width + x;
         const value = gridData[i];
+        
         let color = 205; // 未知区域(浅灰色)
         
         if (value === 0) {
@@ -282,50 +344,38 @@ const MapManagement: React.FC = () => {
           knownPixels++;
         }
         
-        const idx = i * 4;
-        imageData.data[idx] = color;
-        imageData.data[idx + 1] = color;
-        imageData.data[idx + 2] = color;
-        imageData.data[idx + 3] = 255;
+        // 设置像素颜色
+        const idx = (y * width + x) * 4;
+        mapImageData.data[idx] = color;
+        mapImageData.data[idx + 1] = color;
+        mapImageData.data[idx + 2] = color;
+        mapImageData.data[idx + 3] = 255;
       }
-      
-      ctx.putImageData(imageData, 0, 0);
-      console.log('Map drawn successfully, known pixels:', knownPixels, 'of', gridData.length);
-    } else {
-      // 验证gridData长度，如果数据不完整，使用填充值
-      if (gridData.length < width * height) {
-        console.warn('Grid data incomplete, padding with unknown values');
-        const paddedData = new Array(width * height).fill(-1); // -1表示未知区域
-        gridData = paddedData.map((val, idx) => idx < gridData.length ? gridData[idx] : val);
-      } else if (gridData.length > width * height) {
-        console.warn('Grid data too large, truncating');
-        gridData = gridData.slice(0, width * height);
-      }
-      
-      // 重新绘制处理后的地图数据
-      const imageData = ctx.createImageData(width, height);
-      for (let i = 0; i < gridData.length; i++) {
-        const value = gridData[i];
-        let color = 205; // 未知区域(灰色)
-        
-        if (value === 0) {
-          color = 255; // 空闲区域(白色)
-        } else if (value === 100) {
-          color = 0; // 占用区域(黑色)
-        }
-        
-        const idx = i * 4;
-        imageData.data[idx] = color;
-        imageData.data[idx + 1] = color;
-        imageData.data[idx + 2] = color;
-        imageData.data[idx + 3] = 255;
-      }
-      
-      ctx.putImageData(imageData, 0, 0);
-      console.log('Map drawn successfully after data correction');
     }
     
-    // 保存当前状态
+    // 保存画布状态并应用地图变换：上下翻转 + 向左旋转90度
+    ctx.save();
+    // 应用变换：上下翻转 + 向左旋转90度
+    // 1. 先将原点移动到画布中心，以便旋转
+    ctx.translate(width / 2, height / 2);
+    // 2. 向左旋转90度（逆时针）
+    ctx.rotate(-Math.PI / 2);
+    // 3. 上下翻转（垂直翻转）
+    ctx.scale(1, -1);
+    // 4. 将原点移回
+    ctx.translate(-width / 2, -height / 2);
+    
+    // 绘制图像
+    ctx.putImageData(mapImageData, 0, 0);
+    
+    // 恢复画布状态，以便后续绘制机器人
+    ctx.restore();
+    
+    console.log('Map drawn successfully, known pixels:', knownPixels, 'of', gridData.length);
+    console.log('Canvas size:', canvas.width, 'x', canvas.height);
+    console.log('Canvas style size:', canvas.style.width, 'x', canvas.style.height);
+    
+    // 保存当前状态（用于绘制机器人）
     ctx.save();
     
     // 绘制机器人位置
@@ -335,11 +385,12 @@ const MapManagement: React.FC = () => {
     
     if (robotPose && robotPose.pose && robotPose.pose.position && mapData.info && mapData.info.origin && mapData.info.origin.position) {
       // 计算机器人在地图像素坐标系中的位置
+      // 注意：地图坐标系的原点在左下角，而canvas坐标系在左上角
       robotX = (robotPose.pose.position.x - mapData.info.origin.position.x) / resolution;
       robotY = (robotPose.pose.position.y - mapData.info.origin.position.y) / resolution;
       hasValidPose = true;
       console.log('Robot pose in world:', robotPose.pose.position.x, robotPose.pose.position.y);
-      console.log('Robot pose in map pixels:', robotX, robotY);
+      console.log('Robot pose in map pixels (before flip):', robotX, robotY);
       console.log('Map size:', width, 'x', height);
       console.log('Map origin:', mapData.info.origin.position.x, mapData.info.origin.position.y);
       console.log('Resolution:', resolution);
@@ -356,71 +407,76 @@ const MapManagement: React.FC = () => {
     ctx.strokeStyle = '#1976D2'; // 深蓝色边框
     ctx.lineWidth = 2;
     
-    // 计算机器人显示大小（固定像素大小）
-    const robotSizePixels = 20; // 固定20像素大小
-    
     // 计算机器人朝向
     let robotYaw = 0; // 默认朝上
     if (hasValidPose && robotPose.pose.orientation) {
+      // 从四元数计算偏航角
+      const q = robotPose.pose.orientation;
       robotYaw = Math.atan2(
-        2 * (robotPose.pose.orientation.w * robotPose.pose.orientation.z + 
-             robotPose.pose.orientation.x * robotPose.pose.orientation.y),
-        1 - 2 * (robotPose.pose.orientation.y * robotPose.pose.orientation.y + 
-                 robotPose.pose.orientation.z * robotPose.pose.orientation.z)
+        2 * (q.w * q.z + q.x * q.y),
+        1 - 2 * (q.y * q.y + q.z * q.z)
       );
+
+      // 机器人左右反转（水平翻转）
+      robotYaw = -robotYaw;
+      console.log('Robot yaw (radians):', robotYaw);
+      console.log('Robot yaw (degrees):', robotYaw * 180 / Math.PI);
     }
     
     // 计算机器人在canvas上的显示位置
-    // 先计算地图的缩放比例
-    const mapScale = finalScale / resolution;
+    // 地图坐标系原点在左下角，canvas坐标系在左上角
+    const canvasX = robotX;
+    const canvasY = height - 1 - robotY; // 翻转Y轴以匹配地图坐标系，-1因为索引从0开始
     
-    // 将地图坐标转换为canvas坐标
-    const canvasX = robotX * mapScale;
-    const canvasY = robotY * mapScale;
+    // 应用地图变换：上下翻转 + 向左旋转90度
+    // 变换公式：(x, y) → (height - 1 - y, x)
+    const canvasX_transformed = height - 1 - canvasY;
+    const canvasY_transformed = canvasX;
     
-    // 增大机器人显示尺寸
-    const robotDisplaySize = 40; // 增大到40像素
+    console.log('Robot position in world:', robotPose?.pose?.position?.x, robotPose?.pose?.position?.y);
+    console.log('Robot position in map pixels:', robotX, robotY);
+    console.log('Canvas position (original):', canvasX, canvasY);
+    console.log('Canvas position (transformed):', canvasX_transformed, canvasY_transformed);
+    console.log('Map size:', width, 'x', height);
     
-    // 绘制机器人主体（圆形）
-    ctx.beginPath();
-    ctx.arc(canvasX, canvasY, robotDisplaySize * 0.6, 0, 2 * Math.PI);
-    ctx.fill();
-    ctx.stroke();
+    // 机器人显示尺寸（相对于地图尺寸）
+    const robotDisplaySize = Math.max(15, Math.min(30, width * 0.02)); // 动态调整，但不超过30像素
     
-    // 绘制方向指示器（三角形箭头）
+    // 绘制机器人（绿色箭头，类似RViz风格）
+    console.log('Drawing robot at position:', canvasX_transformed, canvasY_transformed);
+    
     ctx.save();
-    ctx.translate(canvasX, canvasY);
+    ctx.translate(canvasX_transformed, canvasY_transformed);
     ctx.rotate(robotYaw);
     
-    // 绘制三角形箭头
+    // 绘制机器人箭头（绿色）
     ctx.beginPath();
     ctx.moveTo(0, -robotDisplaySize); // 箭头顶点
-    ctx.lineTo(-robotDisplaySize * 0.4, robotDisplaySize * 0.3); // 左下角
-    ctx.lineTo(robotDisplaySize * 0.4, robotDisplaySize * 0.3); // 右下角
+    ctx.lineTo(-robotDisplaySize * 0.5, robotDisplaySize * 0.5); // 左下角
+    ctx.lineTo(0, robotDisplaySize * 0.2); // 箭头底部中心
+    ctx.lineTo(robotDisplaySize * 0.5, robotDisplaySize * 0.5); // 右下角
     ctx.closePath();
     
-    // 填充三角形
-    ctx.fillStyle = '#2196F3';
+    ctx.fillStyle = '#4CAF50'; // 绿色填充
     ctx.fill();
-    ctx.strokeStyle = '#1976D2';
+    ctx.strokeStyle = '#2E7D32'; // 深绿色边框
+    ctx.lineWidth = 1.5;
     ctx.stroke();
     
-    ctx.restore();
-    
-    // 绘制机器人中心点
+    // 绘制中心点
     ctx.beginPath();
-    ctx.arc(canvasX, canvasY, robotDisplaySize * 0.15, 0, 2 * Math.PI);
+    ctx.arc(0, 0, 2, 0, 2 * Math.PI);
     ctx.fillStyle = '#FFFFFF'; // 白色中心点
     ctx.fill();
     
-    // 绘制机器人边框（更明显的边框）
-    ctx.beginPath();
-    ctx.arc(canvasX, canvasY, robotDisplaySize * 0.6, 0, 2 * Math.PI);
-    ctx.strokeStyle = '#FF0000'; // 红色边框更醒目
-    ctx.lineWidth = 3;
-    ctx.stroke();
+    ctx.restore();
     
-    console.log('Robot drawn at canvas position:', canvasX, canvasY, 'size:', robotDisplaySize);
+    // 添加调试信息
+    console.log('Robot drawn at:', canvasX_transformed, canvasY_transformed, 'size:', robotDisplaySize);
+    console.log('Robot yaw (degrees):', robotYaw * 180 / Math.PI);
+    console.log('Robot visible on canvas:', canvasX_transformed >= 0 && canvasX_transformed <= width && canvasY_transformed >= 0 && canvasY_transformed <= height);
+    
+    console.log('Robot drawn at canvas position:', canvasX_transformed, canvasY_transformed, 'size:', robotDisplaySize);
     
     // 恢复画布状态
     ctx.restore();
