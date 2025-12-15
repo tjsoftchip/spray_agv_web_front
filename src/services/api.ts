@@ -144,6 +144,28 @@ export const taskQueueApi = {
   stop: () => apiService.post('/task-queue/stop'),
 };
 
+// 创建专门用于长时间操作的axios实例
+const longTimeoutApi = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 60000, // 60秒超时
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+longTimeoutApi.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 export const mapApi = {
   getMaps: () => apiService.get('/maps'),
   getActiveMap: () => apiService.get('/maps/active'),
@@ -156,9 +178,9 @@ export const mapApi = {
   deleteMap: (id: string) => apiService.delete(`/maps/${id}`),
   // 本地API方法（不需要认证）
   getMappingStatusLocal: () => apiService.get('/maps/mapping-status-local'),
-  startMappingLocal: () => apiService.post('/maps/start-mapping-local'),
-  stopMappingLocal: () => apiService.post('/maps/stop-mapping-local'),
-  saveMapLocal: (data: any) => apiService.post('/maps/save-local', data),
+  startMappingLocal: () => longTimeoutApi.post('/maps/start-mapping-local'),
+  stopMappingLocal: () => longTimeoutApi.post('/maps/stop-mapping-local'),
+  saveMapLocal: (data: any) => longTimeoutApi.post('/maps/save-local', data),
 };
 
 export const scheduleApi = {
