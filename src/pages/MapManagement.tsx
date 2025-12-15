@@ -49,55 +49,34 @@ const MapManagement: React.FC = () => {
   }, []);
   
   useEffect(() => {
-    // 订阅地图数据
+// 监听ROS消息
     socketService.on('ros_message', (data: any) => {
-      // console.log('Received ROS message:', data.topic, data.msg ? 'has msg' : 'no msg');
-      
       if (data.topic === '/map') {
-        if (data.msg) {
-          if (data.msg.info && data.msg.data) {
-            setMapData(data.msg);
-          } else {
-            console.warn('Invalid map data structure:', data.msg);
-          }
-        }
-      } else if (data.topic === '/point_cloud') {
-        // 处理点云数据
-        if (data.msg && data.msg.data) {
-          console.log('Point cloud received:', data.msg);
-          // 可以在这里添加点云处理逻辑
-        }
-      } else if (data.topic === '/scan_points') {
-        // 处理扫描点数据
-        if (data.msg && data.msg.points) {
-          console.log('Scan points received:', data.msg);
-          // 可以在这里添加扫描点处理逻辑
-        }
+        console.log('Received map data:', data.msg);
+        setMapData(data.msg);
       } else if (data.topic === '/robot_pose') {
-        // 使用/robot_pose数据（优先级最高，来自robot_pose_publisher）
-        if (data.msg && data.msg.pose) {
-          const { position, orientation } = data.msg.pose;
-          const { x: qx, y: qy, z: qz, w: qw } = orientation;
-          const yaw = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz));
-          console.log('Robot pose received:', {
-            position,
-            orientation: { qx, qy, qz, qw },
-            yawDegrees: (yaw * 180 / Math.PI).toFixed(2) + '°'
-          });
-          setRobotPose(data.msg);
-        }
+        console.log('Received robot pose:', data.msg);
+        setRobotPose({
+          header: { frame_id: 'map' },
+          pose: {
+            position: data.msg.position || data.msg.pose?.position,
+            orientation: data.msg.orientation || data.msg.pose?.orientation
+          }
+        });
+      } else if (data.topic === '/robot_pose_k') {
+        console.log('Received robot pose_k:', data.msg);
+        setRobotPose({
+          header: { frame_id: 'map' },
+          pose: {
+            position: data.msg.position || data.msg.pose?.position,
+            orientation: data.msg.orientation || data.msg.pose?.orientation
+          }
+        });
       } else if (data.topic === '/amcl_pose') {
-        // AMCL定位数据（导航时使用，精度高）
-        if (data.msg && data.msg.pose) {
-          console.log('Using AMCL pose:', data.msg);
-          const amclPose = {
-            header: data.msg.header,
-            pose: data.msg.pose.pose
-          };
-          setRobotPose(amclPose);
-        }
+        console.log('Received AMCL pose:', data.msg);
+        setRobotPose(data.msg);
       } else if (data.topic === '/odom') {
-        // 里程计数据（仅在没有其他数据源时使用）
+        // 里程计数据作为备选
         if (data.msg && data.msg.pose && data.msg.pose.pose) {
           console.log('Using odom data as robot pose:', data.msg);
           const odomPose = {
@@ -105,6 +84,23 @@ const MapManagement: React.FC = () => {
             pose: data.msg.pose.pose
           };
           setRobotPose(odomPose);
+        }
+      } else if (data.topic === '/tf') {
+        // 从TF消息中提取map->base_link变换
+        if (data.msg && data.msg.transforms) {
+          const mapToBase = data.msg.transforms.find((t: any) => 
+            t.header.frame_id === 'map' && t.child_frame_id === 'base_link'
+          );
+          if (mapToBase) {
+            console.log('Found map->base_link transform:', mapToBase);
+            setRobotPose({
+              header: { frame_id: 'map' },
+              pose: {
+                position: mapToBase.transform.translation,
+                orientation: mapToBase.transform.rotation
+              }
+            });
+          }
         }
       }
     });

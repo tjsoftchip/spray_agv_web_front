@@ -64,10 +64,13 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
 
   // 加载地图数据
   useEffect(() => {
-    if (selectedMapId) {
-      loadMapData(selectedMapId);
+    if (selectedMapId && maps.length > 0) {
+      const mapInfo = maps.find(m => m.name === selectedMapId);
+      if (mapInfo) {
+        setCurrentMap(mapInfo);
+      }
     }
-  }, [selectedMapId]);
+  }, [selectedMapId, maps]);
 
   // 绘制地图
   useEffect(() => {
@@ -81,7 +84,14 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
       const data = await apiService.get('/maps/scan-local');
       setMaps(data);
       
-      if (data.length > 0 && !selectedMapId) {
+      // 如果有选中的地图ID，则加载对应的地图
+      if (selectedMapId) {
+        const mapInfo = data.find(m => m.name === selectedMapId);
+        if (mapInfo) {
+          setCurrentMap(mapInfo);
+        }
+      } else if (data.length > 0) {
+        // 只有在没有指定地图ID时才选择第一个地图
         setCurrentMap(data[0]);
         if (onMapChange) {
           onMapChange(data[0].name);

@@ -200,7 +200,7 @@ const TemplateManagement: React.FC = () => {
                       <p><strong>版本：</strong>{selectedTemplate.version}</p>
                       <p><strong>状态：</strong>{selectedTemplate.isActive ? '启用' : '禁用'}</p>
                     </Card>
-                    <Card size="small" title="路径预览">
+                    <Card size="small" title="地图预览">
                       <PGMMapViewer
                         navigationPoints={selectedTemplate.navigationPoints || []}
                         roadSegments={selectedTemplate.roadSegments || []}
