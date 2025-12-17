@@ -12,6 +12,7 @@ import {
   UserOutlined,
   LogoutOutlined,
   ClockCircleOutlined,
+  EnvironmentOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -48,14 +49,14 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       label: '任务管理',
     },
     {
-      key: '/task-queue',
-      icon: <UnorderedListOutlined />,
-      label: '任务队列',
-    },
-    {
       key: '/monitor',
       icon: <DashboardOutlined />,
       label: '实时监控',
+    },
+    {
+      key: '/navigation-monitor',
+      icon: <EnvironmentOutlined />,
+      label: '导航监控',
     },
     {
       key: '/maps',

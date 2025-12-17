@@ -44,10 +44,28 @@ const DeviceControl: React.FC = () => {
 
   // 监听控制模式变化，切换到自动模式时停止运动
   useEffect(() => {
-    if (controlMode !== 'manual') {
-      stopVelocityPublishing();
-      setVelocity({ linear: 0, angular: 0 });
-    }
+    socketService.connect();
+    
+    // 声明 /web_cmd_vel 话题，确保可以发布
+    socketService.sendRosCommand({
+      op: 'advertise',
+      topic: '/web_cmd_vel',
+      type: 'geometry_msgs/msg/Twist'
+    });
+    
+    return () => {
+      if (controlMode === 'manual') {
+        stopVelocityPublishing();
+      }
+      
+      // 取消话题声明
+      socketService.sendRosCommand({
+        op: 'unadvertise',
+        topic: '/web_cmd_vel'
+      });
+      
+      socketService.disconnect();
+    };
   }, [controlMode]);
 
   const publishRosCommand = (topic: string, msgType: string, msg: any) => {

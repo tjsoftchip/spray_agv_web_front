@@ -3,6 +3,12 @@ import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse 
 const getApiBaseUrl = (): string => {
   const envUrl = import.meta.env.VITE_API_BASE_URL;
   
+  // 开发环境：使用相对路径，通过 Vite 代理
+  if (import.meta.env.DEV) {
+    return envUrl || '/api';
+  }
+  
+  // 生产环境：构造完整 URL
   if (envUrl && envUrl.startsWith('/')) {
     return `${window.location.protocol}//${window.location.hostname}:3000${envUrl}`;
   }
@@ -15,6 +21,19 @@ const getApiBaseUrl = (): string => {
 };
 
 const API_BASE_URL = getApiBaseUrl();
+
+// 调试日志
+console.log('[API Service] Environment:', {
+  DEV: import.meta.env.DEV,
+  MODE: import.meta.env.MODE,
+  VITE_API_BASE_URL: import.meta.env.VITE_API_BASE_URL,
+  API_BASE_URL: API_BASE_URL,
+  location: {
+    protocol: window.location.protocol,
+    hostname: window.location.hostname,
+    port: window.location.port,
+  }
+});
 
 class ApiService {
   private axiosInstance: AxiosInstance;
@@ -34,6 +53,19 @@ class ApiService {
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }
+        // 添加缓存破坏参数
+        config.headers['X-Request-Time'] = Date.now().toString();
+        
+        // 详细的请求日志
+        console.log('[API Request]', {
+          method: config.method?.toUpperCase(),
+          url: config.url,
+          baseURL: config.baseURL,
+          fullURL: `${config.baseURL}${config.url}`,
+          hasToken: !!token,
+          headers: config.headers
+        });
+        
         return config;
       },
       (error) => {
@@ -42,8 +74,26 @@ class ApiService {
     );
 
     this.axiosInstance.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        console.log('[API Response]', {
+          status: response.status,
+          url: response.config.url,
+          method: response.config.method?.toUpperCase()
+        });
+        return response;
+      },
       async (error) => {
+        console.error('[API Error]', {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          url: error.config?.url,
+          method: error.config?.method?.toUpperCase(),
+          baseURL: error.config?.baseURL,
+          fullURL: error.config ? `${error.config.baseURL}${error.config.url}` : 'unknown',
+          message: error.message,
+          data: error.response?.data
+        });
+        
         if (error.response?.status === 401) {
           localStorage.removeItem('token');
           localStorage.removeItem('user');
@@ -97,6 +147,7 @@ export const taskApi = {
   getTaskById: (id: string) => apiService.get(`/tasks/${id}`),
   createTask: (data: any) => apiService.post('/tasks', data),
   updateTask: (id: string, data: any) => apiService.put(`/tasks/${id}`, data),
+  updateTaskOrder: (data: Array<{ id: string; order: number }>) => apiService.put('/tasks/order', data),
   deleteTask: (id: string) => apiService.delete(`/tasks/${id}`),
   executeTask: (id: string) => apiService.post(`/tasks/${id}/execute`),
   pauseTask: (id: string) => apiService.post(`/tasks/${id}/pause`),
@@ -214,3 +265,5 @@ export const userApi = {
   updateUser: (id: string, data: any) => apiService.put(`/users/${id}`, data),
   deleteUser: (id: string) => apiService.delete(`/users/${id}`),
 };
+
+export { navigationApi, obstacleApi } from './navigationApi';

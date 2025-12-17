@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Space, Modal, Form, Switch, Select, InputNumber, message, Popconfirm, Row, Col, Divider } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { apiService } from '../services/api';
 
 interface RoadSegmentManagerProps {
   templateId: string;
@@ -18,14 +19,20 @@ const RoadSegmentManager: React.FC<RoadSegmentManagerProps> = ({
   const [modalVisible, setModalVisible] = useState(false);
   const [editingSegment, setEditingSegment] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [localSegments, setLocalSegments] = useState<any[]>(roadSegments);
   const [form] = Form.useForm();
+
+  // 监听 props 变化，更新本地状态
+  useEffect(() => {
+    setLocalSegments([...roadSegments]);
+  }, [JSON.stringify(roadSegments)]);
 
   useEffect(() => {
     // 当导航点变化时，可以提示用户生成路段
-    if (navigationPoints.length >= 2 && roadSegments.length === 0) {
+    if (navigationPoints.length >= 2 && localSegments.length === 0) {
       message.info('检测到有导航点，可以自动生成路段');
     }
-  }, [navigationPoints, roadSegments]);
+  }, [navigationPoints, localSegments]);
 
   const handleCreate = () => {
     setEditingSegment(null);
@@ -58,17 +65,9 @@ const RoadSegmentManager: React.FC<RoadSegmentManagerProps> = ({
 
     try {
       setLoading(true);
-      const response = await fetch(`/api/templates/${templateId}/road-segments/generate`, {
-        method: 'POST',
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        message.success(`已生成 ${data.length} 个路段`);
-        onUpdate();
-      } else {
-        throw new Error('Generate failed');
-      }
+      const data = await apiService.post(`/templates/${templateId}/road-segments/generate`, {});
+      await onUpdate();
+      message.success(`已生成 ${data.length} 个路段`);
     } catch (error) {
       message.error('生成路段失败');
     } finally {
@@ -78,16 +77,9 @@ const RoadSegmentManager: React.FC<RoadSegmentManagerProps> = ({
 
   const handleDelete = async (id: string) => {
     try {
-      const response = await fetch(`/api/templates/${templateId}/road-segments/${id}`, {
-        method: 'DELETE',
-      });
-      
-      if (response.ok) {
-        message.success('删除成功');
-        onUpdate();
-      } else {
-        throw new Error('Delete failed');
-      }
+      await apiService.delete(`/templates/${templateId}/road-segments/${id}`);
+      await onUpdate();
+      message.success('删除成功');
     } catch (error) {
       message.error('删除失败');
     }
@@ -98,28 +90,15 @@ const RoadSegmentManager: React.FC<RoadSegmentManagerProps> = ({
       setLoading(true);
       const values = await form.validateFields();
       
-      let response;
       if (editingSegment) {
-        response = await fetch(`/api/templates/${templateId}/road-segments/${editingSegment.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(values),
-        });
+        await apiService.put(`/templates/${templateId}/road-segments/${editingSegment.id}`, values);
       } else {
-        response = await fetch(`/api/templates/${templateId}/road-segments`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(values),
-        });
+        await apiService.post(`/templates/${templateId}/road-segments`, values);
       }
       
-      if (response.ok) {
-        message.success(editingSegment ? '更新成功' : '创建成功');
-        setModalVisible(false);
-        onUpdate();
-      } else {
-        throw new Error('Save failed');
-      }
+      await onUpdate();
+      setModalVisible(false);
+      message.success(editingSegment ? '更新成功' : '创建成功');
     } catch (error) {
       message.error('操作失败');
     } finally {
@@ -267,7 +246,7 @@ const RoadSegmentManager: React.FC<RoadSegmentManagerProps> = ({
     >
       <Table
         columns={columns}
-        dataSource={roadSegments}
+        dataSource={localSegments}
         rowKey="id"
         pagination={false}
         size="small"

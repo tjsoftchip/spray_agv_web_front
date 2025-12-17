@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Popconfirm, Card, Tabs, Row, Col } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ArrowLeftOutlined, EnvironmentOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { templateApi } from '../services/api';
 import NavigationPointManager from '../components/NavigationPointManager';
 import RoadSegmentManager from '../components/RoadSegmentManager';
@@ -32,11 +32,35 @@ const TemplateManagement: React.FC = () => {
     }
   };
 
-  const loadTemplates = async () => {
+  const loadTemplates = async (reloadSelected: boolean = true) => {
     setLoading(true);
     try {
       const data = await templateApi.getTemplates();
       setTemplates(data);
+      
+      // 只有在 reloadSelected 为 true 且有选中的模板时，才重新加载选中的模板
+      if (reloadSelected && selectedTemplate) {
+        try {
+          const updatedTemplate = await templateApi.getTemplateById(selectedTemplate.id);
+          // 强制创建新对象引用，确保 React 检测到变化
+          setSelectedTemplate({
+            ...updatedTemplate,
+            navigationPoints: [...(updatedTemplate.navigationPoints || [])],
+            roadSegments: [...(updatedTemplate.roadSegments || [])],
+          });
+        } catch (error) {
+          console.error('Failed to reload selected template:', error);
+          // 如果获取失败，尝试从列表中查找
+          const fallbackTemplate = data.find((t: any) => t.id === selectedTemplate.id);
+          if (fallbackTemplate) {
+            setSelectedTemplate({
+              ...fallbackTemplate,
+              navigationPoints: [...(fallbackTemplate.navigationPoints || [])],
+              roadSegments: [...(fallbackTemplate.roadSegments || [])],
+            });
+          }
+        }
+      }
     } catch (error: any) {
       message.error('加载模板列表失败');
     } finally {
@@ -62,7 +86,8 @@ const TemplateManagement: React.FC = () => {
 
   const handleBackToList = () => {
     setSelectedTemplate(null);
-    loadTemplates();
+    // 加载模板列表，但不重新加载选中的模板
+    loadTemplates(false);
   };
 
   const handleDelete = async (id: string) => {
@@ -190,7 +215,7 @@ const TemplateManagement: React.FC = () => {
                 key: 'basic',
                 label: '基本信息',
                 children: (
-                  <Space direction="vertical" style={{ width: '100%' }} size="large">
+                  <Space vertical style={{ width: '100%' }} size="large">
                     <Card size="small" title="模板信息">
                       <p><strong>模板名称：</strong>{selectedTemplate.name}</p>
                       <p><strong>描述：</strong>{selectedTemplate.description || '无'}</p>
@@ -217,9 +242,11 @@ const TemplateManagement: React.FC = () => {
                 label: '导航点管理',
                 children: (
                   <NavigationPointManager
+                    key={`navpoints-${selectedTemplate.id}-${(selectedTemplate.navigationPoints || []).length}`}
                     templateId={selectedTemplate.id}
                     navigationPoints={selectedTemplate.navigationPoints || []}
                     onUpdate={loadTemplates}
+                    mapId={selectedTemplate.defaultMapId}
                   />
                 ),
               },
@@ -228,6 +255,7 @@ const TemplateManagement: React.FC = () => {
                 label: '路段喷淋参数',
                 children: (
                   <RoadSegmentManager
+                    key={`segments-${selectedTemplate.id}-${(selectedTemplate.roadSegments || []).length}`}
                     templateId={selectedTemplate.id}
                     roadSegments={selectedTemplate.roadSegments || []}
                     navigationPoints={selectedTemplate.navigationPoints || []}

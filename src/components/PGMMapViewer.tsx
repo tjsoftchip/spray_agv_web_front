@@ -41,7 +41,6 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
   navigationPoints = [],
   roadSegments = [],
   onMapClick,
-  onNavigationPointClick,
   selectedMapId,
   onMapChange,
   showMapSelector = true,
@@ -55,7 +54,7 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [loading, setLoading] = useState(false);
+  const [localRobotPosition, setLocalRobotPosition] = useState<{ x: number; y: number } | undefined>(robotPosition);
 
   // 加载地图列表
   useEffect(() => {
@@ -86,7 +85,7 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
       
       // 如果有选中的地图ID，则加载对应的地图
       if (selectedMapId) {
-        const mapInfo = data.find(m => m.name === selectedMapId);
+        const mapInfo = data.find((m: any) => m.name === selectedMapId);
         if (mapInfo) {
           setCurrentMap(mapInfo);
         }
@@ -103,21 +102,7 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
     }
   };
 
-  const loadMapData = async (mapId: string) => {
-    setLoading(true);
-    try {
-      // 查找地图信息
-      const mapInfo = maps.find(m => m.name === mapId);
-      if (mapInfo) {
-        setCurrentMap(mapInfo);
-      }
-    } catch (error) {
-      console.error('Failed to load map data:', error);
-      message.error('加载地图数据失败');
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   const drawMap = () => {
     const canvas = canvasRef.current;
@@ -159,7 +144,7 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
       drawNavigationPoints(ctx, finalScale, imgX, imgY);
       
       // 绘制机器人位置
-      if (robotPosition) {
+      if (robotPosition || localRobotPosition) {
         drawRobotPosition(ctx, finalScale, imgX, imgY);
       }
     };
@@ -170,9 +155,14 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
 
   const drawNavigationPoints = (ctx: CanvasRenderingContext2D, scale: number, offsetX: number, offsetY: number) => {
     navigationPoints.forEach((point) => {
-      // 转换坐标
-      const x = offsetX + (point.position.x - currentMap.origin.x) * scale;
-      const y = offsetY + (point.position.y - currentMap.origin.y) * scale;
+      // 世界坐标转换为相对世界坐标（米）
+      const relativeWorldX = point.position.x - currentMap.origin.x;
+      const relativeWorldY = point.position.y - currentMap.origin.y;
+      
+      // 相对世界坐标转换为画布坐标（需要翻转Y轴）
+      // Y轴翻转：worldY 越大，画布 Y 应该越小
+      const x = offsetX + relativeWorldX * scale;
+      const y = offsetY + (currentMap.height * currentMap.resolution - relativeWorldY) * scale;
 
       // 设置颜色
       const colors = {
@@ -207,10 +197,17 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
       const endPoint = navigationPoints.find(p => p.id === segment.endNavPointId);
 
       if (startPoint && endPoint) {
-        const startX = offsetX + (startPoint.position.x - currentMap.origin.x) * scale;
-        const startY = offsetY + (startPoint.position.y - currentMap.origin.y) * scale;
-        const endX = offsetX + (endPoint.position.x - currentMap.origin.x) * scale;
-        const endY = offsetY + (endPoint.position.y - currentMap.origin.y) * scale;
+        // 世界坐标转换为相对世界坐标（米）
+        const startRelWorldX = startPoint.position.x - currentMap.origin.x;
+        const startRelWorldY = startPoint.position.y - currentMap.origin.y;
+        const endRelWorldX = endPoint.position.x - currentMap.origin.x;
+        const endRelWorldY = endPoint.position.y - currentMap.origin.y;
+        
+        // 相对世界坐标转换为画布坐标（需要翻转Y轴）
+        const startX = offsetX + startRelWorldX * scale;
+        const startY = offsetY + (currentMap.height * currentMap.resolution - startRelWorldY) * scale;
+        const endX = offsetX + endRelWorldX * scale;
+        const endY = offsetY + (currentMap.height * currentMap.resolution - endRelWorldY) * scale;
 
         // 绘制连线
         ctx.beginPath();
@@ -242,8 +239,16 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
   };
 
   const drawRobotPosition = (ctx: CanvasRenderingContext2D, scale: number, offsetX: number, offsetY: number) => {
-    const x = offsetX + (robotPosition!.x - currentMap.origin.x) * scale;
-    const y = offsetY + (robotPosition!.y - currentMap.origin.y) * scale;
+    const position = localRobotPosition || robotPosition;
+    if (!position) return;
+    
+    // 世界坐标转换为相对世界坐标（米）
+    const relativeWorldX = position.x - currentMap.origin.x;
+    const relativeWorldY = position.y - currentMap.origin.y;
+    
+    // 相对世界坐标转换为画布坐标（需要翻转Y轴）
+    const x = offsetX + relativeWorldX * scale;
+    const y = offsetY + (currentMap.height * currentMap.resolution - relativeWorldY) * scale;
 
     // 绘制机器人位置
     ctx.fillStyle = '#fa8c16';
@@ -264,7 +269,29 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
   };
 
   const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!onMapClick || !canvasRef.current || !currentMap) return;
+    // 如果没有 onMapClick 回调，说明这是预览模式，不处理点击
+    if (!onMapClick) {
+      return;
+    }
+    
+    if (!canvasRef.current || !currentMap) {
+      console.warn('Cannot handle map click: missing canvas or map data');
+      return;
+    }
+
+    // 验证地图元数据
+    if (!currentMap.origin || !currentMap.resolution || !currentMap.width || !currentMap.height) {
+      console.error('Invalid map metadata:', currentMap);
+      message.error('地图元数据不完整，无法进行坐标转换');
+      return;
+    }
+    
+    console.log('Map metadata:', {
+      origin: currentMap.origin,
+      resolution: currentMap.resolution,
+      width: currentMap.width,
+      height: currentMap.height
+    });
 
     const rect = canvasRef.current.getBoundingClientRect();
     const x = event.clientX - rect.left;
@@ -298,25 +325,34 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
     const mapOffsetX = (canvasWidth - mapWidth) / 2 + offset.x;
     const mapOffsetY = (canvasHeight - mapHeight) / 2 + offset.y;
     
-    // 计算点击位置相对于地图的坐标
+    // 计算点击位置相对于地图的坐标（画布像素）
     const relativeX = canvasX - mapOffsetX;
     const relativeY = canvasY - mapOffsetY;
     
-    // 转换为世界坐标
-    const worldX = (relativeX / finalScale) + currentMap.origin.x;
-    const worldY = (relativeY / finalScale) + currentMap.origin.y;
+    // 转换为世界坐标（米）
+    // finalScale 是从米到画布像素的缩放比例
+    // 所以 relative / finalScale 得到的是米
+    const relativeWorldX = relativeX / finalScale;
+    const relativeWorldY = relativeY / finalScale;
+    
+    // 加上 origin 得到绝对世界坐标
+    // 注意：图像坐标系Y轴向下，世界坐标系Y轴向上，需要翻转Y坐标
+    const worldX = currentMap.origin.x + relativeWorldX;
+    const worldY = currentMap.origin.y + (currentMap.height * currentMap.resolution - relativeWorldY);
 
-    console.log('Map click:', {
-      canvasX,
-      canvasY,
-      mapOffsetX,
-      mapOffsetY,
-      relativeX,
-      relativeY,
-      finalScale,
-      worldX,
-      worldY,
-    });
+    console.log('=== 坐标转换详情 ===');
+    console.log(`点击位置: display(${x.toFixed(1)}, ${y.toFixed(1)}) -> canvas(${canvasX.toFixed(1)}, ${canvasY.toFixed(1)})`);
+    console.log(`地图偏移: mapOffset(${mapOffsetX.toFixed(1)}, ${mapOffsetY.toFixed(1)}), scale=${finalScale.toFixed(3)}`);
+    console.log(`相对坐标: relativeCanvas(${relativeX.toFixed(1)}, ${relativeY.toFixed(1)}) -> relativeWorld(${relativeWorldX.toFixed(3)}, ${relativeWorldY.toFixed(3)}m)`);
+    console.log(`世界坐标: world(${worldX.toFixed(3)}, ${worldY.toFixed(3)})`);
+    console.log('==================');
+
+    // 验证结果
+    if (isNaN(worldX) || isNaN(worldY)) {
+      console.error('Invalid world coordinates calculated');
+      message.error('坐标转换失败，请重试');
+      return;
+    }
 
     onMapClick({ x: worldX, y: worldY });
   };
@@ -364,9 +400,8 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
   const handleGetCurrentPosition = async () => {
     try {
       const data = await apiService.get('/templates/robot/current-position');
-      // 这里可以更新机器人位置状态
       if (data && data.position) {
-        setRobotPosition(data.position);
+        setLocalRobotPosition(data.position);
       }
       message.success('已获取当前机器人位置');
     } catch (error) {

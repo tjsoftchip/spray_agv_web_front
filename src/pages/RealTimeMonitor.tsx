@@ -16,6 +16,8 @@ const RealTimeMonitor: React.FC = () => {
   const socketConnectedRef = useRef(false);
   const speedHistoryRef = useRef<number[]>([]); // 速度历史记录
   const lastValidSpeedRef = useRef(0); // 上次有效速度
+  const batteryChartRef = useRef<any>(null);
+  const waterChartRef = useRef<any>(null);
 
   const mockNavigationPoints = [
     {
@@ -110,6 +112,25 @@ const RealTimeMonitor: React.FC = () => {
 
     return () => {
       clearInterval(interval);
+      
+      // 安全地清理 ECharts 实例
+      try {
+        if (batteryChartRef.current) {
+          const echartsInstance = batteryChartRef.current.getEchartsInstance?.();
+          if (echartsInstance && typeof echartsInstance.dispose === 'function') {
+            echartsInstance.dispose();
+          }
+        }
+        if (waterChartRef.current) {
+          const echartsInstance = waterChartRef.current.getEchartsInstance?.();
+          if (echartsInstance && typeof echartsInstance.dispose === 'function') {
+            echartsInstance.dispose();
+          }
+        }
+      } catch (error) {
+        console.error('Error disposing ECharts instances:', error);
+      }
+      
       if (socketConnectedRef.current) {
         socketService.off('ros_message', handleRosMessage);
         // 取消订阅odom_raw话题
@@ -240,6 +261,7 @@ const RealTimeMonitor: React.FC = () => {
             <Suspense fallback={<Loading type="skeleton" rows={6} />}>
               <div style={{ height: '300px', width: '100%' }}>
                 <ReactECharts
+                  ref={batteryChartRef}
                   option={{
                     tooltip: {
                       trigger: 'axis',
@@ -303,6 +325,7 @@ const RealTimeMonitor: React.FC = () => {
             <Suspense fallback={<Loading type="skeleton" rows={6} />}>
 <div style={{ height: '300px', width: '100%' }}>
                 <ReactECharts
+                  ref={waterChartRef}
                   option={{
                     tooltip: {
                       trigger: 'axis',

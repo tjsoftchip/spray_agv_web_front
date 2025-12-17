@@ -7,7 +7,15 @@ const getWsUrl = (): string => {
     return envUrl;
   }
   
-  // 使用当前页面的主机地址，确保跨设备访问
+  // 开发环境：使用当前页面的地址（通过 Vite 代理）
+  // 生产环境：需要在 .env 中配置 VITE_WS_URL
+  if (import.meta.env.DEV) {
+    // 开发环境直接连接到后端端口，不使用代理
+    const hostname = window.location.hostname;
+    return `http://${hostname}:3000`;
+  }
+  
+  // 生产环境回退：使用当前页面的主机地址和后端端口
   const hostname = window.location.hostname;
   const port = '3000';
   return `${window.location.protocol}//${hostname}:${port}`;
@@ -21,14 +29,18 @@ class SocketService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private reconnectDelay = 1000;
+  private connectionRefCount = 0; // 连接引用计数
 
   public connect(): void {
+    this.connectionRefCount++;
+    
     if (this.socket?.connected) {
+      console.log(`Socket already connected (ref count: ${this.connectionRefCount})`);
       return;
     }
 
     this.connectionStatus = 'connecting';
-    console.log('Connecting to WebSocket server...');
+    console.log(`Connecting to WebSocket server (ref count: ${this.connectionRefCount})...`);
 
     this.socket = io(WS_URL, {
       transports: ['websocket', 'polling'], // 添加polling作为备用传输方式
@@ -106,7 +118,16 @@ class SocketService {
   }
 
   public disconnect(): void {
-    if (this.socket) {
+    if (this.connectionRefCount > 0) {
+      this.connectionRefCount--;
+    }
+    
+    console.log(`Disconnect called (ref count: ${this.connectionRefCount})`);
+    
+    // 只有当引用计数为0时才真正断开连接
+    if (this.connectionRefCount === 0 && this.socket) {
+      console.log('Actually disconnecting socket...');
+      this.stopHeartbeat();
       this.socket.disconnect();
       this.socket = null;
       this.connectionStatus = 'disconnected';

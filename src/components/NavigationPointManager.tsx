@@ -1,25 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Space, Modal, Form, Input, InputNumber, Select, message, Popconfirm, Row, Col } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, EnvironmentOutlined, AimOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, EnvironmentOutlined, AimOutlined, RocketOutlined } from '@ant-design/icons';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import PGMMapViewer from './PGMMapViewer';
 import { apiService } from '../services/api';
+import { navigationApi } from '../services/navigationApi';
 
 interface NavigationPointManagerProps {
   templateId: string;
   navigationPoints: any[];
   onUpdate: () => void;
+  mapId?: string;
 }
 
-const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templateId, navigationPoints, onUpdate }) => {
+const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templateId, navigationPoints, onUpdate, mapId }) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [mapSelectVisible, setMapSelectVisible] = useState(false);
   const [editingPoint, setEditingPoint] = useState<any>(null);
-  const [selectedMapId, setSelectedMapId] = useState<string>('');
   const [robotPosition, setRobotPosition] = useState<{ x: number; y: number } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [localPoints, setLocalPoints] = useState<any[]>(navigationPoints);
   const [form] = Form.useForm();
+
+  // 监听 props 变化，更新本地状态
+  useEffect(() => {
+    setLocalPoints([...navigationPoints]);
+  }, [JSON.stringify(navigationPoints)]);
 
   useEffect(() => {
     // 可以在这里加载默认地图或机器人位置
@@ -62,18 +69,41 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
 
   const handleDelete = async (id: string) => {
     try {
-      const response = await fetch(`/api/templates/${templateId}/navigation-points/${id}`, {
-        method: 'DELETE',
-      });
+      const result = await apiService.delete(`/templates/${templateId}/navigation-points/${id}`);
+      await onUpdate();
       
-      if (response.ok) {
-        message.success('删除成功');
-        onUpdate();
+      if (result.deletedSegmentsCount > 0) {
+        message.success(`删除成功，同时删除了 ${result.deletedSegmentsCount} 个相关路段`);
       } else {
-        throw new Error('Delete failed');
+        message.success('删除成功');
       }
     } catch (error) {
       message.error('删除失败');
+    }
+  };
+
+  const handleTestNavigation = async (point: any) => {
+    if (!templateId) {
+      message.error('模板ID不存在');
+      return;
+    }
+
+    console.log('[Navigation Test]', {
+      templateId,
+      pointId: point.id,
+      pointName: point.name,
+      position: point.position
+    });
+
+    try {
+      setLoading(true);
+      await navigationApi.gotoPoint(templateId, point.id);
+      message.success(`开始导航到 ${point.name}`);
+    } catch (error) {
+      console.error('[Navigation Test Error]', error);
+      message.error('导航测试失败');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -82,29 +112,17 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
       setLoading(true);
       const values = await form.validateFields();
       
-      let response;
       if (editingPoint) {
-        response = await fetch(`/api/templates/${templateId}/navigation-points/${editingPoint.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(values),
-        });
+        await apiService.put(`/templates/${templateId}/navigation-points/${editingPoint.id}`, values);
       } else {
-        response = await fetch(`/api/templates/${templateId}/navigation-points`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(values),
-        });
+        await apiService.post(`/templates/${templateId}/navigation-points`, values);
       }
       
-      if (response.ok) {
-        message.success(editingPoint ? '更新成功' : '创建成功');
-        setModalVisible(false);
-        onUpdate();
-      } else {
-        throw new Error('Save failed');
-      }
+      await onUpdate();
+      setModalVisible(false);
+      message.success(editingPoint ? '更新成功' : '创建成功');
     } catch (error) {
+      console.error('操作失败:', error);
       message.error('操作失败');
     } finally {
       setLoading(false);
@@ -136,8 +154,6 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
     const x = typeof position.x === 'number' && !isNaN(position.x) ? position.x : 0;
     const y = typeof position.y === 'number' && !isNaN(position.y) ? position.y : 0;
     
-    console.log('Setting position from map click:', { x, y, originalPosition: position });
-    
     form.setFieldsValue({
       position: { x, y, z: 0 },
     });
@@ -147,18 +163,9 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
 
   const handleReorder = async (pointIds: string[]) => {
     try {
-      const response = await fetch(`/api/templates/${templateId}/navigation-points/reorder`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pointIds }),
-      });
-      
-      if (response.ok) {
-        message.success('顺序已更新');
-        onUpdate();
-      } else {
-        throw new Error('Reorder failed');
-      }
+      await apiService.put(`/templates/${templateId}/navigation-points/reorder`, { pointIds });
+      message.success('顺序已更新');
+      onUpdate();
     } catch (error) {
       message.error('更新顺序失败');
     }
@@ -167,12 +174,15 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
-      const oldIndex = navigationPoints.findIndex((p) => p.id === active.id);
-      const newIndex = navigationPoints.findIndex((p) => p.id === over.id);
-      const reorderedPoints = arrayMove(navigationPoints, oldIndex, newIndex).map((p, index) => ({
+      const oldIndex = localPoints.findIndex((p) => p.id === active.id);
+      const newIndex = localPoints.findIndex((p) => p.id === over.id);
+      const reorderedPoints = arrayMove(localPoints, oldIndex, newIndex).map((p, index) => ({
         ...p,
         order: index + 1,
       }));
+      
+      // 立即更新本地状态，提供即时反馈
+      setLocalPoints(reorderedPoints);
       
       const pointIds = reorderedPoints.map(p => p.id);
       handleReorder(pointIds);
@@ -218,6 +228,14 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
           <Button 
             type="link" 
             size="small"
+            icon={<RocketOutlined />} 
+            onClick={() => handleTestNavigation(record)}
+          >
+            测试导航
+          </Button>
+          <Button 
+            type="link" 
+            size="small"
             icon={<EditOutlined />} 
             onClick={() => handleEdit(record)}
           >
@@ -248,10 +266,10 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
       }
     >
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={navigationPoints.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={localPoints.map((p) => p.id)} strategy={verticalListSortingStrategy}>
           <Table
             columns={columns}
-            dataSource={navigationPoints}
+            dataSource={localPoints}
             rowKey="id"
             pagination={false}
             size="small"
@@ -382,7 +400,9 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
         <PGMMapViewer
           navigationPoints={navigationPoints}
           onMapClick={handleMapClick}
-          robotPosition={robotPosition}
+          robotPosition={robotPosition || undefined}
+          selectedMapId={mapId}
+          showMapSelector={true}
           height="600px"
         />
       </Modal>

@@ -354,17 +354,18 @@ const MapManagement: React.FC = () => {
       const response = await mapApi.getMappingStatusLocal();
       console.log('Mapping status response:', response);
       
-      // 只有在明确收到 isMapping: false 时才设置为 idle
-      // 避免因网络错误导致的误判
-      if (response && response.isMapping === true) {
-        setMappingStatus('mapping');
-      } else if (response && response.isMapping === false) {
+      // 明确判断建图状态
+      if (response && typeof response.isMapping === 'boolean') {
+        setMappingStatus(response.isMapping ? 'mapping' : 'idle');
+      } else {
+        // 如果响应格式不正确，默认设置为 idle
+        console.warn('Invalid mapping status response, defaulting to idle');
         setMappingStatus('idle');
       }
-      // 如果响应为空或格式不正确，保持当前状态不变
     } catch (error) {
       console.error('Failed to check mapping status:', error);
-      // 网络错误时不改变状态，避免误判
+      // 网络错误时设置为 idle，避免误显示建图状态
+      setMappingStatus('idle');
     }
   };
 
@@ -590,6 +591,7 @@ const MapManagement: React.FC = () => {
       render: (_: any, record: any) => (
         <Space>
           <Button 
+            key="load"
             type="link" 
             size="small"
             onClick={() => handleLoadMap(record.id)}
@@ -598,6 +600,7 @@ const MapManagement: React.FC = () => {
           </Button>
           {!record.isActive && (
             <Button 
+              key="setActive"
               type="link" 
               size="small"
               onClick={() => handleSetActive(record.id)}
@@ -606,6 +609,7 @@ const MapManagement: React.FC = () => {
             </Button>
           )}
           <Popconfirm
+            key="delete"
             title="确定删除此地图吗？"
             onConfirm={() => handleDeleteMap(record.id)}
             okText="确定"

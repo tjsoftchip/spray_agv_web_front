@@ -284,7 +284,7 @@ const SupplyManagement: React.FC = () => {
         </Col>
 
         <Col xs={24}>
-          <Card title="补给控制" bordered={false}>
+          <Card title="补给控制" variant="borderless">
             <Space size="large" wrap>
               <Button
                 type="primary"
@@ -315,7 +315,7 @@ const SupplyManagement: React.FC = () => {
         </Col>
 
         <Col xs={24} lg={12}>
-          <Card title="充电控制" bordered={false}>
+          <Card title="充电控制" variant="borderless">
             <Space>
               <Button
                 type="primary"
@@ -330,7 +330,7 @@ const SupplyManagement: React.FC = () => {
         </Col>
 
         <Col xs={24} lg={12}>
-          <Card title="注水控制" bordered={false}>
+          <Card title="注水控制" variant="borderless">
             <Space>
               <Button
                 type="primary"
@@ -345,7 +345,7 @@ const SupplyManagement: React.FC = () => {
         </Col>
 
         <Col xs={24}>
-          <Card title="提示信息" bordered={false}>
+          <Card title="提示信息" variant="borderless">
             <div style={{ color: '#999' }}>
               <p>• 当水位低于 {supplyStatus.waterThreshold}% 或电量低于 {supplyStatus.batteryThreshold}% 时，系统会自动触发补给流程</p>
               <p>• 补给过程中会自动导航到补给站、对齐位置、进行充电和注水</p>

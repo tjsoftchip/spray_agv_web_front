@@ -1,4 +1,4 @@
-import React, { useEffect, useState, lazy, Suspense } from 'react';
+import React, { useEffect, useState, lazy, Suspense, useRef } from 'react';
 import { Card, Row, Col, Statistic, Progress, Badge } from 'antd';
 import { 
   RobotOutlined, 
@@ -18,6 +18,8 @@ const Dashboard: React.FC = () => {
     temperature: 25,
     status: 'idle',
   });
+  const taskChartRef = useRef<any>(null);
+  const performanceChartRef = useRef<any>(null);
 
   useEffect(() => {
     socketService.connect();
@@ -27,6 +29,24 @@ const Dashboard: React.FC = () => {
     });
 
     return () => {
+      // 安全地清理 ECharts 实例
+      try {
+        if (taskChartRef.current) {
+          const echartsInstance = taskChartRef.current.getEchartsInstance?.();
+          if (echartsInstance && typeof echartsInstance.dispose === 'function') {
+            echartsInstance.dispose();
+          }
+        }
+        if (performanceChartRef.current) {
+          const echartsInstance = performanceChartRef.current.getEchartsInstance?.();
+          if (echartsInstance && typeof echartsInstance.dispose === 'function') {
+            echartsInstance.dispose();
+          }
+        }
+      } catch (error) {
+        console.error('Error disposing ECharts instances:', error);
+      }
+      
       socketService.disconnect();
     };
   }, []);
@@ -129,6 +149,7 @@ const Dashboard: React.FC = () => {
             <Suspense fallback={<Loading type="skeleton" rows={6} />}>
 <div style={{ height: '300px', width: '100%' }}>
                 <ReactECharts
+                ref={taskChartRef}
                 option={{
                   tooltip: {
                     trigger: 'axis',
@@ -188,6 +209,7 @@ const Dashboard: React.FC = () => {
             <Suspense fallback={<Loading type="skeleton" rows={6} />}>
               <div style={{ height: '300px', width: '100%' }}>
                 <ReactECharts
+                ref={performanceChartRef}
                 option={{
                   tooltip: {
                     trigger: 'item',
