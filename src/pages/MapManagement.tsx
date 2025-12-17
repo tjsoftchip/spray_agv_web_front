@@ -32,8 +32,14 @@ const MapManagement: React.FC = () => {
   };
 
   useEffect(() => {
-    loadMaps();
-    checkMappingStatus();
+    // 立即加载地图列表和检查建图状态
+    const initializeComponent = async () => {
+      console.log('Initializing MapManagement component...');
+      await loadMaps();
+      await checkMappingStatus();
+    };
+    
+    initializeComponent();
     
     // 连接WebSocket
     socketService.connect();
@@ -354,12 +360,14 @@ const MapManagement: React.FC = () => {
       const response = await mapApi.getMappingStatusLocal();
       console.log('Mapping status response:', response);
       
-      // 明确判断建图状态
+      // 明确判断建图状态，严格检查 isMapping 字段
       if (response && typeof response.isMapping === 'boolean') {
-        setMappingStatus(response.isMapping ? 'mapping' : 'idle');
+        const newStatus = response.isMapping ? 'mapping' : 'idle';
+        console.log('Setting mapping status to:', newStatus);
+        setMappingStatus(newStatus);
       } else {
         // 如果响应格式不正确，默认设置为 idle
-        console.warn('Invalid mapping status response, defaulting to idle');
+        console.warn('Invalid mapping status response, defaulting to idle:', response);
         setMappingStatus('idle');
       }
     } catch (error) {
@@ -494,30 +502,140 @@ const MapManagement: React.FC = () => {
 
   const handleLoadMap = async (id: string) => {
     try {
-      await mapApi.loadMap(id);
-      message.success('地图加载成功');
+      console.log('Loading map for preview:', id);
+      message.loading({ content: '正在加载地图...', key: 'loadMap' });
+      
+      // 获取地图详细信息
+      const response = await fetch(`/api/maps/scan-local`);
+      const maps = await response.json();
+      const selectedMap = maps.find((m: any) => m.id === id);
+      
+      if (!selectedMap) {
+        message.error({ content: '地图不存在', key: 'loadMap' });
+        return;
+      }
+      
+      console.log('Selected map info:', selectedMap);
+      
+      // 从后端获取 PNG 图像数据
+      const imageResponse = await fetch(`/api/maps/${id}/image`);
+      if (!imageResponse.ok) {
+        throw new Error('Failed to fetch map image');
+      }
+      
+      const imageBlob = await imageResponse.blob();
+      
+      // 将 PNG 图像转换为地图数据
+      const img = new Image();
+      
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = selectedMap.width;
+          canvas.height = selectedMap.height;
+          const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            throw new Error('Failed to get canvas context');
+          }
+          
+          // 绘制图像
+          ctx.drawImage(img, 0, 0);
+          
+          // 获取像素数据
+          const imageData = ctx.getImageData(0, 0, selectedMap.width, selectedMap.height);
+          const pixels = imageData.data;
+          
+          // 转换为地图数据格式（0-100）
+          const mapDataArray = [];
+          for (let i = 0; i < pixels.length; i += 4) {
+            const gray = pixels[i]; // R 通道（PNG 是灰度图）
+            
+            // 转换：白色(255) -> 0 (空闲), 黑色(0) -> 100 (占用), 灰色 -> -1 (未知)
+            let value = -1;
+            if (gray > 250) {
+              value = 0; // 空闲
+            } else if (gray < 10) {
+              value = 100; // 占用
+            } else if (gray > 200 && gray <= 250) {
+              value = 0; // 接近白色，视为空闲
+            }
+            
+            mapDataArray.push(value);
+          }
+          
+          // 设置地图数据
+          const mapData = {
+            info: {
+              width: selectedMap.width,
+              height: selectedMap.height,
+              resolution: selectedMap.resolution,
+              origin: {
+                position: selectedMap.origin
+              }
+            },
+            data: mapDataArray
+          };
+          
+          console.log('Map data constructed:', {
+            width: mapData.info.width,
+            height: mapData.info.height,
+            resolution: mapData.info.resolution,
+            dataLength: mapData.data.length,
+            origin: mapData.info.origin.position
+          });
+          
+          setMapData(mapData);
+          message.success({ content: '地图预览加载成功', key: 'loadMap' });
+          
+          // 释放 blob URL
+          URL.revokeObjectURL(img.src);
+        } catch (error) {
+          console.error('Error processing map image:', error);
+          message.error({ content: '地图图像处理失败', key: 'loadMap' });
+        }
+      };
+      
+      img.onerror = () => {
+        console.error('Failed to load map image');
+        message.error({ content: '地图图像加载失败', key: 'loadMap' });
+        URL.revokeObjectURL(img.src);
+      };
+      
+      img.src = URL.createObjectURL(imageBlob);
+      
+      // 同时设置为激活地图
+      await mapApi.setActiveMapLocal(id);
       loadMaps();
     } catch (error: any) {
-      message.error('加载地图失败');
+      console.error('加载地图失败:', error);
+      message.error({ content: '加载地图失败', key: 'loadMap' });
     }
   };
 
   const handleDeleteMap = async (id: string) => {
     try {
-      await mapApi.deleteMap(id);
+      console.log('Deleting map:', id);
+      await mapApi.deleteMapLocal(id);
       message.success('删除成功');
-      loadMaps();
+      // 延迟刷新，确保文件系统操作完成
+      setTimeout(() => {
+        loadMaps();
+      }, 500);
     } catch (error: any) {
+      console.error('删除地图失败:', error);
       message.error('删除失败');
     }
   };
 
   const handleSetActive = async (id: string) => {
     try {
-      await mapApi.setActiveMap(id);
+      console.log('Setting active map:', id);
+      await mapApi.setActiveMapLocal(id);
       message.success('已设置为默认地图');
       loadMaps();
     } catch (error: any) {
+      console.error('设置默认地图失败:', error);
       message.error('设置失败');
     }
   };

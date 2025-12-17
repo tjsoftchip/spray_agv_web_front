@@ -232,6 +232,9 @@ export const mapApi = {
   startMappingLocal: () => longTimeoutApi.post('/maps/start-mapping-local'),
   stopMappingLocal: () => longTimeoutApi.post('/maps/stop-mapping-local'),
   saveMapLocal: (data: any) => longTimeoutApi.post('/maps/save-local', data),
+  deleteMapLocal: (id: string) => apiService.delete(`/maps/${id}/delete-local`),
+  setActiveMapLocal: (id: string) => apiService.put(`/maps/${id}/set-active-local`),
+  loadMapLocal: (id: string) => apiService.post(`/maps/${id}/load-local`),
 };
 
 export const scheduleApi = {

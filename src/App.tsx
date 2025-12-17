@@ -15,11 +15,11 @@ const TaskManagement = lazy(() => import('./pages/TaskManagement'));
 const TaskQueue = lazy(() => import('./pages/TaskQueue'));
 const DeviceControl = lazy(() => import('./pages/DeviceControl'));
 const SupplyManagement = lazy(() => import('./pages/SupplyManagement'));
-const RealTimeMonitor = lazy(() => import('./pages/RealTimeMonitor'));
 const MapManagement = lazy(() => import('./pages/MapManagement'));
 const SystemSettings = lazy(() => import('./pages/SystemSettings'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
 const ScheduleManagement = lazy(() => import('./pages/ScheduleManagement'));
+const StatusMonitor = lazy(() => import('./pages/StatusMonitor'));
 const NavigationMonitor = lazy(() => import('./pages/NavigationMonitor'));
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -45,7 +45,8 @@ const App: React.FC = () => {
                         <Route path="/" element={<Dashboard />} />
                         <Route path="/templates" element={<TemplateManagement />} />
                         <Route path="/tasks" element={<TaskManagement />} />
-                        <Route path="/monitor" element={<RealTimeMonitor />} />
+                        <Route path="/monitor" element={<StatusMonitor />} />
+                        <Route path="/status" element={<StatusMonitor />} />
                         <Route path="/navigation-monitor" element={<NavigationMonitor />} />
                         <Route path="/maps" element={<MapManagement />} />
                         <Route path="/control" element={<DeviceControl />} />

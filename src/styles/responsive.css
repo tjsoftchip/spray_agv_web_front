@@ -51,12 +51,50 @@ button,
 /* 开关控件 */
 .ant-switch {
   min-width: 52px !important;
-  height: 28px !important;
+  height: 26px !important;
+  background-color: #d9d9d9 !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.ant-switch-checked {
+  background-color: #1677ff !important;
 }
 
 .ant-switch-handle {
   width: 24px !important;
   height: 24px !important;
+  border-radius: 50% !important;
+  top: 1px !important;
+  left: 1px !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+  background-color: #ffffff !important;
+  border: 1px solid #d9d9d9 !important;
+}
+
+.ant-switch-checked .ant-switch-handle {
+  left: calc(100% - 25px) !important;
+  transform: translateX(0) !important;
+}
+
+/* 移动端开关适配 */
+@media (max-width: 768px) {
+  .ant-switch {
+    min-width: 56px !important;
+    height: 28px !important;
+  }
+  
+  .ant-switch-handle {
+    width: 26px !important;
+    height: 26px !important;
+    border-radius: 50% !important;
+    top: 1px !important;
+    left: 1px !important;
+  }
+  
+  .ant-switch-checked .ant-switch-handle {
+    left: calc(100% - 27px) !important;
+  }
 }
 
 /* 滑块控件 */
