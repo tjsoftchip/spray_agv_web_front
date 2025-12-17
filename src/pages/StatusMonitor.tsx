@@ -118,6 +118,30 @@ const StatusMonitor: React.FC = () => {
       });
     };
 
+    // 订阅机器人位置话题
+    const subscribeToRobotPose = () => {
+      // 订阅 robot_pose 话题（建图时使用）
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/robot_pose',
+        type: 'geometry_msgs/PoseStamped'
+      });
+      
+      // 订阅 amcl_pose 话题（导航时使用）
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/amcl_pose',
+        type: 'geometry_msgs/PoseWithCovarianceStamped'
+      });
+      
+      // 订阅 odom 话题作为备选
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/odom',
+        type: 'nav_msgs/Odometry'
+      });
+    };
+
     // 监听ROS消息
     const handleRosMessage = (data: any) => {
       if (data.topic === '/vel_raw' && data.msg) {
@@ -145,6 +169,25 @@ const StatusMonitor: React.FC = () => {
           setCameraImage(imageData);
         }
       }
+      
+      // 处理机器人位置消息
+      if (data.topic === '/robot_pose' && data.msg && data.msg.pose) {
+        const position = data.msg.pose.position;
+        setRobotPosition({ x: position.x, y: position.y });
+        console.log('Robot pose updated from /robot_pose:', { x: position.x, y: position.y });
+      }
+      
+      if (data.topic === '/amcl_pose' && data.msg && data.msg.pose) {
+        const position = data.msg.pose.pose.position;
+        setRobotPosition({ x: position.x, y: position.y });
+        console.log('Robot pose updated from /amcl_pose:', { x: position.x, y: position.y });
+      }
+      
+      if (data.topic === '/odom' && data.msg && data.msg.pose) {
+        const position = data.msg.pose.pose.position;
+        setRobotPosition({ x: position.x, y: position.y });
+        console.log('Robot pose updated from /odom:', { x: position.x, y: position.y });
+      }
     };
 
     // 监听导航和障碍物状态
@@ -162,6 +205,7 @@ const StatusMonitor: React.FC = () => {
     
     subscribeToVelocity();
     subscribeToCamera();
+    subscribeToRobotPose();
     loadInitialData();
 
     const interval = setInterval(() => {
@@ -198,6 +242,9 @@ const StatusMonitor: React.FC = () => {
         // 取消订阅话题
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/vel_raw' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/camera/image_raw' });
+        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/robot_pose' });
+        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/amcl_pose' });
+        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/odom' });
         
         socketService.disconnect();
         socketConnectedRef.current = false;
