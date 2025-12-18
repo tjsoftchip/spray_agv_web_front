@@ -68,11 +68,6 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       label: '补给管理',
     },
     {
-      key: '/schedules',
-      icon: <ClockCircleOutlined />,
-      label: '定时任务',
-    },
-    {
       key: '/settings',
       icon: <SettingOutlined />,
       label: '系统设置',

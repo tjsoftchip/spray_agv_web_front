@@ -1,22 +1,15 @@
-import React, { useState, useEffect, lazy, Suspense, useRef } from 'react';
-import { Card, Row, Col, Statistic, Progress, Tag, Button, Space, Alert } from 'antd';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Card, Row, Col, Progress, Tag, Button, Space, Switch } from 'antd';
 import { 
-  ThunderboltOutlined, 
-  DashboardOutlined, 
-  DropboxOutlined, 
   PlayCircleOutlined, 
   PauseOutlined, 
   StopOutlined,
-  WarningOutlined,
-  CheckCircleOutlined,
   EyeOutlined
 } from '@ant-design/icons';
 import MapViewer from '../components/MapViewer';
-import Loading from '../components/Loading';
 import { socketService } from '../services/socket';
 import { navigationApi, obstacleApi } from '../services/navigationApi';
-
-const ReactECharts = lazy(() => import('echarts-for-react'));
+import type { ObstacleStatus } from '../services/navigationApi';
 
 interface NavigationStatus {
   status: string;
@@ -31,57 +24,67 @@ interface NavigationStatus {
   };
 }
 
-interface ObstacleStatus {
-  status: string;
-  message: string;
-  laser_detected: boolean;
-  camera_detected: boolean;
-  closest_laser_distance?: number;
-  closest_depth_distance?: number;
-  action: string;
-  timestamp: number;
-}
-
 const StatusMonitor: React.FC = () => {
-  const [robotPosition, setRobotPosition] = useState({ x: 0, y: 0 });
+  // 机器人位置（初始为世界坐标原点，等待从 ROS2 获取实际位置）
+  const [robotPosition, setRobotPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [batteryLevel, setBatteryLevel] = useState(85);
   const [waterLevel, setWaterLevel] = useState(70);
+  const [linearVelocity, setLinearVelocity] = useState(0); // 线速度 m/s
+  const [angularVelocity, setAngularVelocity] = useState(0); // 角速度 rad/s
+
+  // 地图加载完成回调
+  const handleMapLoaded = (mapInfo: { origin: { x: number; y: number; z: number }; resolution: number; width: number; height: number }) => {
+    console.log('Map loaded:', mapInfo);
+    // 地图加载完成，机器人位置将从 ROS2 实时数据中获取
+  };
   const [speed, setSpeed] = useState(0);
   const [taskStatus] = useState<'idle' | 'running' | 'paused'>('idle');
   const [navigationStatus, setNavigationStatus] = useState<NavigationStatus | null>(null);
   const [obstacleStatus, setObstacleStatus] = useState<ObstacleStatus | null>(null);
   const [cameraImage, setCameraImage] = useState<string | null>(null);
+  const [enableCameraPreview, setEnableCameraPreview] = useState(false);
+  const [useWebVideoServer, setUseWebVideoServer] = useState(true); // 使用 web_video_server
   const [controlLoading, setControlLoading] = useState(false);
   const [mapCenter] = useState<[number, number]>([0, 0]);
   
   const socketConnectedRef = useRef(false);
   const speedHistoryRef = useRef<number[]>([]);
-  const batteryChartRef = useRef<any>(null);
-  const waterChartRef = useRef<any>(null);
+  const lastCameraUpdateRef = useRef<number>(0);
+  const enableCameraPreviewRef = useRef(enableCameraPreview);
 
-  const mockNavigationPoints = [
-    {
-      id: '1',
-      name: '起点',
-      position: { x: 0, y: 0, z: 0 },
-      type: 'start' as const,
-      order: 1,
-    },
-    {
-      id: '2',
-      name: '路径点1',
-      position: { x: 0.0005, y: 0.0005, z: 0 },
-      type: 'waypoint' as const,
-      order: 2,
-    },
-    {
-      id: '3',
-      name: '终点',
-      position: { x: 0.001, y: 0.001, z: 0 },
-      type: 'end' as const,
-      order: 3,
-    },
-  ];
+  // 同步 ref 和 state
+  useEffect(() => {
+    enableCameraPreviewRef.current = enableCameraPreview;
+  }, [enableCameraPreview]);
+
+  const subscribeToCamera = useCallback(() => {
+    if (enableCameraPreviewRef.current) {
+      const status = socketService.getConnectionStatus();
+      console.log('Subscribing to camera topic, socket status:', status);
+      
+      if (status !== 'connected') {
+        console.warn('Socket not connected, attempting to connect...');
+        socketService.connect();
+        // 等待连接后再订阅
+        setTimeout(() => {
+          socketService.sendRosCommand({
+            op: 'subscribe',
+            topic: '/camera/color/image_raw',
+            type: 'sensor_msgs/Image'
+          });
+        }, 1000);
+      } else {
+        socketService.sendRosCommand({
+          op: 'subscribe',
+          topic: '/camera/color/image_raw',
+          type: 'sensor_msgs/Image'
+        });
+      }
+    }
+  }, []);
+
+  // 导航点数据（暂时为空，等待从后端获取实际数据）
+  const mockNavigationPoints: any[] = [];
 
   const mockRoadSegments = [
     {
@@ -100,7 +103,6 @@ const StatusMonitor: React.FC = () => {
     socketService.connect();
     socketConnectedRef.current = true;
 
-    // 订阅 /vel_raw 话题获取速度（修复速度话题）
     const subscribeToVelocity = () => {
       socketService.sendRosCommand({
         op: 'subscribe',
@@ -109,32 +111,19 @@ const StatusMonitor: React.FC = () => {
       });
     };
 
-    // 订阅相机图像话题
-    const subscribeToCamera = () => {
-      socketService.sendRosCommand({
-        op: 'subscribe',
-        topic: '/camera/image_raw',
-        type: 'sensor_msgs/CompressedImage'
-      });
-    };
-
-    // 订阅机器人位置话题
     const subscribeToRobotPose = () => {
-      // 订阅 robot_pose 话题（建图时使用）
       socketService.sendRosCommand({
         op: 'subscribe',
         topic: '/robot_pose',
         type: 'geometry_msgs/PoseStamped'
       });
       
-      // 订阅 amcl_pose 话题（导航时使用）
       socketService.sendRosCommand({
         op: 'subscribe',
         topic: '/amcl_pose',
         type: 'geometry_msgs/PoseWithCovarianceStamped'
       });
       
-      // 订阅 odom 话题作为备选
       socketService.sendRosCommand({
         op: 'subscribe',
         topic: '/odom',
@@ -142,55 +131,78 @@ const StatusMonitor: React.FC = () => {
       });
     };
 
-    // 监听ROS消息
     const handleRosMessage = (data: any) => {
       if (data.topic === '/vel_raw' && data.msg) {
-        // 从Twist消息中提取速度信息
         const linearVel = data.msg.linear?.x || 0;
         const angularVel = data.msg.angular?.z || 0;
-        
-        // 计算合速度 (线速度的绝对值)
         const rawSpeed = Math.abs(linearVel);
         const filteredSpeed = filterSpeed(rawSpeed);
         setSpeed(filteredSpeed);
-        
-        console.log('Velocity data received:', {
-          linearVel,
-          angularVel,
-          rawSpeed,
-          filteredSpeed
-        });
+        setLinearVelocity(linearVel);
+        setAngularVelocity(angularVel);
       }
       
-      if (data.topic === '/camera/image_raw' && data.msg) {
-        // 处理相机图像
-        if (data.msg.data) {
-          const imageData = `data:image/jpeg;base64,${data.msg.data}`;
-          setCameraImage(imageData);
+      if (data.topic === '/camera/color/image_raw' && data.msg) {
+        if (!enableCameraPreviewRef.current) {
+          console.log('Camera preview disabled, ignoring image');
+          return;
+        }
+        
+        const now = Date.now();
+        if (now - lastCameraUpdateRef.current < 500) {
+          return;
+        }
+        
+        console.log('Received camera image data, encoding:', data.msg.encoding);
+        
+        try {
+          if (data.msg.data && data.msg.width && data.msg.height) {
+            // 原始图像数据，需要转换为可显示格式
+            // 使用 Canvas 转换 RGB8 数据为图像
+            const canvas = document.createElement('canvas');
+            canvas.width = data.msg.width;
+            canvas.height = data.msg.height;
+            const ctx = canvas.getContext('2d');
+            
+            if (ctx) {
+              const imageData = ctx.createImageData(data.msg.width, data.msg.height);
+              const rawData = new Uint8Array(data.msg.data);
+              
+              // RGB8 格式转换为 RGBA
+              for (let i = 0; i < rawData.length / 3; i++) {
+                imageData.data[i * 4] = rawData[i * 3];       // R
+                imageData.data[i * 4 + 1] = rawData[i * 3 + 1]; // G
+                imageData.data[i * 4 + 2] = rawData[i * 3 + 2]; // B
+                imageData.data[i * 4 + 3] = 255;               // A
+              }
+              
+              ctx.putImageData(imageData, 0, 0);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+              setCameraImage(dataUrl);
+              lastCameraUpdateRef.current = now;
+            }
+          }
+        } catch (error) {
+          console.error('Error processing camera image:', error);
         }
       }
       
-      // 处理机器人位置消息
       if (data.topic === '/robot_pose' && data.msg && data.msg.pose) {
         const position = data.msg.pose.position;
         setRobotPosition({ x: position.x, y: position.y });
-        console.log('Robot pose updated from /robot_pose:', { x: position.x, y: position.y });
       }
       
       if (data.topic === '/amcl_pose' && data.msg && data.msg.pose) {
         const position = data.msg.pose.pose.position;
         setRobotPosition({ x: position.x, y: position.y });
-        console.log('Robot pose updated from /amcl_pose:', { x: position.x, y: position.y });
       }
       
       if (data.topic === '/odom' && data.msg && data.msg.pose) {
         const position = data.msg.pose.pose.position;
         setRobotPosition({ x: position.x, y: position.y });
-        console.log('Robot pose updated from /odom:', { x: position.x, y: position.y });
       }
     };
 
-    // 监听导航和障碍物状态
     const handleNavigationStatus = (data: NavigationStatus) => {
       setNavigationStatus(data);
     };
@@ -216,32 +228,13 @@ const StatusMonitor: React.FC = () => {
     return () => {
       clearInterval(interval);
       
-      // 清理ECharts实例
-      try {
-        if (batteryChartRef.current) {
-          const echartsInstance = batteryChartRef.current.getEchartsInstance?.();
-          if (echartsInstance && typeof echartsInstance.dispose === 'function') {
-            echartsInstance.dispose();
-          }
-        }
-        if (waterChartRef.current) {
-          const echartsInstance = waterChartRef.current.getEchartsInstance?.();
-          if (echartsInstance && typeof echartsInstance.dispose === 'function') {
-            echartsInstance.dispose();
-          }
-        }
-      } catch (error) {
-        console.error('Error disposing ECharts instances:', error);
-      }
-      
       if (socketConnectedRef.current) {
         socketService.off('ros_message', handleRosMessage);
         socketService.off('navigation_status', handleNavigationStatus);
         socketService.off('obstacle_status', handleObstacleStatus);
         
-        // 取消订阅话题
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/vel_raw' });
-        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/camera/image_raw' });
+        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/camera/color/image_raw/compressed' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/robot_pose' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/amcl_pose' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/odom' });
@@ -250,7 +243,22 @@ const StatusMonitor: React.FC = () => {
         socketConnectedRef.current = false;
       }
     };
-  }, []);
+  }, [subscribeToCamera]);
+
+  useEffect(() => {
+    console.log('Camera preview state changed:', enableCameraPreview, 'useWebVideoServer:', useWebVideoServer);
+    if (enableCameraPreview && !useWebVideoServer) {
+      // 只有不使用 web_video_server 时才通过 WebSocket 订阅
+      subscribeToCamera();
+    } else if (!enableCameraPreview) {
+      console.log('Unsubscribing from camera topic...');
+      socketService.sendRosCommand({ 
+        op: 'unsubscribe', 
+        topic: '/camera/color/image_raw' 
+      });
+      setCameraImage(null);
+    }
+  }, [enableCameraPreview, useWebVideoServer, subscribeToCamera]);
 
   const loadInitialData = async () => {
     try {
@@ -320,7 +328,6 @@ const StatusMonitor: React.FC = () => {
     return colors[status] || 'default';
   };
 
-  // 速度滤波函数
   const filterSpeed = (rawSpeed: number): number => {
     const DEADZONE_THRESHOLD = 0.02;
     const HISTORY_SIZE = 5;
@@ -344,380 +351,498 @@ const StatusMonitor: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: '16px' }}>
-      {/* 状态概览 - 紧凑排列 */}
-      <Row gutter={[12, 12]} style={{ marginBottom: '16px' }}>
-        <Col xs={12} sm={8} md={4}>
-          <Card size="small" bodyStyle={{ padding: '12px' }}>
-            <Statistic
-              title={<span style={{ fontSize: '12px' }}>电池</span>}
-              value={batteryLevel}
-              suffix="%"
-              prefix={<ThunderboltOutlined />}
-              valueStyle={{ fontSize: '14px', color: batteryLevel > 20 ? '#3f8600' : '#cf1322' }}
-            />
-            <Progress 
-              percent={batteryLevel} 
-              size="small" 
-              showInfo={false}
-              status={batteryLevel > 20 ? 'active' : 'exception'} 
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={8} md={4}>
-          <Card size="small" bodyStyle={{ padding: '12px' }}>
-            <Statistic
-              title={<span style={{ fontSize: '12px' }}>水位</span>}
-              value={waterLevel}
-              suffix="%"
-              prefix={<DropboxOutlined />}
-              valueStyle={{ fontSize: '14px', color: waterLevel > 10 ? '#3f8600' : '#cf1322' }}
-            />
-            <Progress 
-              percent={waterLevel} 
-              size="small" 
-              showInfo={false}
-              status={waterLevel > 10 ? 'active' : 'exception'} 
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={8} md={4}>
-          <Card size="small" bodyStyle={{ padding: '12px' }}>
-            <Statistic
-              title={<span style={{ fontSize: '12px' }}>速度</span>}
-              value={speed}
-              suffix="m/s"
-              prefix={<DashboardOutlined />}
-              valueStyle={{ fontSize: '14px' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={8} md={4}>
-          <Card size="small" bodyStyle={{ padding: '12px' }}>
-            <div style={{ marginBottom: '4px' }}>
-              <span style={{ fontSize: '12px' }}>任务状态</span>
+    <div style={{ padding: '20px', backgroundColor: '#f0f2f5', minHeight: '100vh' }}>
+      {/* 第一行：基础状态（4个） */}
+      <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
+        <Col xs={12} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                🔋 电池电量
+              </div>
+              <div style={{ 
+                fontSize: '28px', 
+                fontWeight: 600, 
+                color: batteryLevel > 20 ? '#52c41a' : '#ff4d4f',
+                marginBottom: '8px'
+              }}>
+                {batteryLevel.toFixed(2)}%
+              </div>
+              <Progress 
+                percent={parseFloat(batteryLevel.toFixed(2))} 
+                size="small" 
+                showInfo={false}
+                status={batteryLevel > 20 ? 'active' : 'exception'}
+                strokeColor={batteryLevel > 20 ? '#52c41a' : '#ff4d4f'}
+              />
             </div>
-            <Tag 
-              color={getStatusColor(taskStatus)} 
-              style={{ fontSize: '12px', padding: '2px 8px' }}
-            >
-              {taskStatus === 'idle' ? '空闲' : taskStatus === 'running' ? '运行中' : '已暂停'}
-            </Tag>
           </Card>
         </Col>
-        <Col xs={12} sm={8} md={4}>
-          <Card size="small" bodyStyle={{ padding: '12px' }}>
-            <Statistic
-              title={<span style={{ fontSize: '12px' }}>位置</span>}
-              value={`(${robotPosition.x.toFixed(3)}, ${robotPosition.y.toFixed(3)})`}
-              valueStyle={{ fontSize: '12px' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={8} md={4}>
-          <Card size="small" bodyStyle={{ padding: '12px' }}>
-            <div style={{ marginBottom: '4px' }}>
-              <span style={{ fontSize: '12px' }}>导航状态</span>
+        
+        <Col xs={12} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                💧 水箱水位
+              </div>
+              <div style={{ 
+                fontSize: '28px', 
+                fontWeight: 600, 
+                color: waterLevel > 10 ? '#1890ff' : '#ff4d4f',
+                marginBottom: '8px'
+              }}>
+                {waterLevel.toFixed(2)}%
+              </div>
+              <Progress 
+                percent={parseFloat(waterLevel.toFixed(2))} 
+                size="small" 
+                showInfo={false}
+                status={waterLevel > 10 ? 'active' : 'exception'}
+                strokeColor={waterLevel > 10 ? '#1890ff' : '#ff4d4f'}
+              />
             </div>
-            <Tag 
-              color={navigationStatus ? getStatusColor(navigationStatus.status) : 'default'}
-              style={{ fontSize: '12px', padding: '2px 8px' }}
-            >
-              {navigationStatus ? navigationStatus.status : '无任务'}
-            </Tag>
+          </Card>
+        </Col>
+        
+        <Col xs={12} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                🚀 移动速度
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: 600, color: '#722ed1', marginBottom: '4px' }}>
+                {linearVelocity.toFixed(2)} m/s
+              </div>
+              <div style={{ fontSize: '16px', fontWeight: 500, color: '#1890ff' }}>
+                {(angularVelocity * 180 / Math.PI).toFixed(1)}°/s
+              </div>
+              <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>线速度 / 角速度</div>
+            </div>
+          </Card>
+        </Col>
+        
+        <Col xs={12} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                📍 机器人位置
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 600, color: '#fa8c16' }}>
+                <div style={{ marginBottom: '4px' }}>横坐标: {robotPosition ? robotPosition.x.toFixed(2) : '--'}米</div>
+                <div>纵坐标: {robotPosition ? robotPosition.y.toFixed(2) : '--'}米</div>
+              </div>
+            </div>
           </Card>
         </Col>
       </Row>
 
-      {/* 主要内容区域 */}
-      <Row gutter={[12, 12]}>
-        {/* 左侧：地图和导航控制 */}
+      {/* 第二行：传感器和任务状态（4个） */}
+      <Row gutter={[16, 16]} style={{ marginBottom: '20px' }}>
+        <Col xs={12} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                📡 激光雷达
+              </div>
+              <div style={{ 
+                fontSize: '18px', 
+                fontWeight: 600, 
+                color: obstacleStatus?.laser_detected ? '#ff4d4f' : '#52c41a'
+              }}>
+                {obstacleStatus?.laser_detected ? '⚠️ 检测到障碍' : '✓ 正常运行'}
+              </div>
+              {obstacleStatus?.closest_laser_distance !== null && obstacleStatus?.closest_laser_distance !== undefined && (
+                <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+                  最近距离: {obstacleStatus.closest_laser_distance.toFixed(2)}米
+                </div>
+              )}
+              {!obstacleStatus && (
+                <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+                  等待传感器数据
+                </div>
+              )}
+            </div>
+          </Card>
+        </Col>
+        
+        <Col xs={12} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                📷 深度相机
+              </div>
+              <div style={{ 
+                fontSize: '18px', 
+                fontWeight: 600, 
+                color: obstacleStatus?.camera_detected ? '#ff4d4f' : '#52c41a'
+              }}>
+                {obstacleStatus?.camera_detected ? '⚠️ 检测到障碍' : '✓ 正常运行'}
+              </div>
+              {obstacleStatus?.closest_depth_distance !== null && obstacleStatus?.closest_depth_distance !== undefined && (
+                <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+                  最近距离: {obstacleStatus.closest_depth_distance.toFixed(2)}米
+                </div>
+              )}
+              {!obstacleStatus && (
+                <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+                  等待传感器数据
+                </div>
+              )}
+            </div>
+          </Card>
+        </Col>
+        
+        <Col xs={12} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                {obstacleStatus?.status === 'CLEAR' ? '✅' : '⚠️'} 障碍物检测
+              </div>
+              {obstacleStatus ? (
+                <>
+                  <Tag 
+                    color={getObstacleColor(obstacleStatus.status)}
+                    style={{ fontSize: '16px', padding: '6px 16px', marginBottom: '12px' }}
+                  >
+                    {obstacleStatus.message}
+                  </Tag>
+                  <div style={{ 
+                    fontSize: '14px',
+                    color: obstacleStatus.action === 'stop' ? '#ff4d4f' : 
+                           obstacleStatus.action === 'slow' ? '#faad14' : '#52c41a',
+                    fontWeight: 500
+                  }}>
+                    建议: {obstacleStatus.action === 'continue' ? '继续前进' : 
+                          obstacleStatus.action === 'slow' ? '减速行驶' : 
+                          obstacleStatus.action === 'stop' ? '立即停止' : '等待指令'}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: '14px', color: '#999' }}>
+                  等待检测数据
+                </div>
+              )}
+            </div>
+          </Card>
+        </Col>
+        
+        <Col xs={12} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                🎯 任务与导航
+              </div>
+              <Space vertical size="small" style={{ width: '100%' }}>
+                <Tag 
+                  color={getStatusColor(taskStatus)} 
+                  style={{ fontSize: '14px', padding: '4px 12px', width: '100%' }}
+                >
+                  任务: {taskStatus === 'idle' ? '空闲' : taskStatus === 'running' ? '运行中' : '已暂停'}
+                </Tag>
+                <Tag 
+                  color={navigationStatus ? getStatusColor(navigationStatus.status) : 'default'}
+                  style={{ fontSize: '14px', padding: '4px 12px', width: '100%' }}
+                >
+                  导航: {navigationStatus ? navigationStatus.status : '无任务'}
+                </Tag>
+              </Space>
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 主要内容区域：地图和相机并排 */}
+      <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
           <Card 
-            title="地图监控" 
-            size="small" 
-            bodyStyle={{ padding: '12px' }}
-            style={{ marginBottom: '12px' }}
+            title={<span style={{ fontSize: '16px', fontWeight: 600 }}>🗺️ 地图监控</span>}
+            style={{ 
+              boxShadow: '0 2px 12px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+            styles={{ body: { padding: '16px' } }}
           >
-            <MapViewer
-              navigationPoints={mockNavigationPoints}
-              roadSegments={mockRoadSegments}
-              robotPosition={robotPosition}
-              center={mapCenter}
-              zoom={16}
-            />
+            <div style={{ 
+              width: '100%',
+              height: '480px',
+              backgroundColor: 'transparent',
+              borderRadius: '4px',
+              overflow: 'hidden',
+              position: 'relative'
+            }}>
+              <MapViewer
+                navigationPoints={mockNavigationPoints}
+                roadSegments={mockRoadSegments}
+                robotPosition={robotPosition}
+                center={mapCenter}
+                zoom={16}
+                onMapLoaded={handleMapLoaded}
+              />
+            </div>
           </Card>
-
-          {/* 导航控制 */}
-          {navigationStatus && (
-            <Card title="导航控制" size="small" bodyStyle={{ padding: '12px' }}>
-              <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                <div>
-                  <Tag color={getStatusColor(navigationStatus.status)}>
-                    {navigationStatus.status}
-                  </Tag>
-                  <span style={{ marginLeft: 8, fontSize: '12px' }}>
-                    {navigationStatus.currentIndex + 1}/{navigationStatus.totalPoints}
-                  </span>
-                </div>
-                <Progress
-                  percent={navigationStatus.progress}
-                  size="small"
-                  status={navigationStatus.status === 'running' ? 'active' : 'normal'}
-                />
-                <Space>
-                  {navigationStatus.status === 'running' && (
-                    <Button
-                      size="small"
-                      icon={<PauseOutlined />}
-                      onClick={handlePause}
-                      loading={controlLoading}
-                    >
-                      暂停
-                    </Button>
-                  )}
-                  {navigationStatus.status === 'paused' && (
-                    <Button
-                      size="small"
-                      type="primary"
-                      icon={<PlayCircleOutlined />}
-                      onClick={handleResume}
-                      loading={controlLoading}
-                    >
-                      恢复
-                    </Button>
-                  )}
-                  {(navigationStatus.status === 'running' || navigationStatus.status === 'paused') && (
-                    <Button
-                      size="small"
-                      danger
-                      icon={<StopOutlined />}
-                      onClick={handleStop}
-                      loading={controlLoading}
-                    >
-                      停止
-                    </Button>
-                  )}
-                </Space>
-              </Space>
-            </Card>
-          )}
         </Col>
 
-        {/* 右侧：相机预览和障碍物检测 */}
         <Col xs={24} lg={12}>
-          {/* 相机预览 */}
           <Card 
             title={
-              <Space>
-                <EyeOutlined />
-                <span>相机预览</span>
-              </Space>
-            } 
-            size="small" 
-            bodyStyle={{ padding: '12px' }}
-            style={{ marginBottom: '12px' }}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                <span style={{ fontSize: '16px', fontWeight: 600 }}>
+                  📷 相机预览
+                </span>
+                <Switch 
+                  checked={enableCameraPreview}
+                  onChange={setEnableCameraPreview}
+                  checkedChildren="开启"
+                  unCheckedChildren="关闭"
+                />
+              </div>
+            }
+            style={{ 
+              boxShadow: '0 2px 12px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+            styles={{ body: { padding: '16px' } }}
           >
-            {cameraImage ? (
-              <img 
-                src={cameraImage} 
-                alt="Camera Feed" 
-                style={{ 
-                  width: '100%', 
-                  height: '200px', 
-                  objectFit: 'cover',
-                  borderRadius: '4px'
-                }}
-              />
-            ) : (
-              <div style={{ 
-                height: '200px', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                backgroundColor: '#f5f5f5',
-                borderRadius: '4px'
-              }}>
-                <span style={{ color: '#999' }}>等待相机数据...</span>
-              </div>
-            )}
-          </Card>
-
-          {/* 障碍物检测 */}
-          <Card title="障碍物检测" size="small" bodyStyle={{ padding: '12px' }}>
-            {obstacleStatus ? (
-              <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                <Alert
-                  title={
-                    <Space>
-                      {obstacleStatus.status === 'CLEAR' ? (
-                        <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                      ) : (
-                        <WarningOutlined style={{ color: '#ff4d4f' }} />
-                      )}
-                      <span style={{ fontSize: '12px' }}>{obstacleStatus.message}</span>
-                    </Space>
-                  }
-                  type={obstacleStatus.status === 'CLEAR' ? 'success' : 'warning'}
-                  showIcon={false}
-                  style={{ marginBottom: '8px' }}
+            <div style={{ 
+              height: '480px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              backgroundColor: enableCameraPreview ? '#1a1a1a' : '#f5f5f5',
+              borderRadius: '4px',
+              overflow: 'hidden',
+              position: 'relative'
+            }}>
+              {enableCameraPreview && useWebVideoServer ? (
+                <img 
+                  src={`http://${window.location.hostname}:8080/stream?topic=/camera/color/image_raw&type=mjpeg&quality=80`}
+                  alt="相机画面" 
+                  style={{ 
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    width: 'auto',
+                    height: 'auto',
+                    objectFit: 'contain'
+                  }}
+                  onError={(e) => {
+                    console.error('Failed to load video stream from web_video_server');
+                    // 回退到 WebSocket 方式
+                    setUseWebVideoServer(false);
+                  }}
                 />
-
-                <Row gutter={8}>
-                  <Col span={12}>
-                    <Card size="small">
-                      <Statistic
-                        title={<span style={{ fontSize: '12px' }}>激光雷达</span>}
-                        value={obstacleStatus.laser_detected ? '检测到' : '正常'}
-                        valueStyle={{ 
-                          fontSize: '12px',
-                          color: obstacleStatus.laser_detected ? '#ff4d4f' : '#52c41a',
-                        }}
-                      />
-                      {obstacleStatus.closest_laser_distance && (
-                        <p style={{ marginTop: 4, fontSize: '11px' }}>
-                          距离: {obstacleStatus.closest_laser_distance.toFixed(2)}m
-                        </p>
-                      )}
-                    </Card>
-                  </Col>
-                  <Col span={12}>
-                    <Card size="small">
-                      <Statistic
-                        title={<span style={{ fontSize: '12px' }}>深度相机</span>}
-                        value={obstacleStatus.camera_detected ? '检测到' : '正常'}
-                        valueStyle={{ 
-                          fontSize: '12px',
-                          color: obstacleStatus.camera_detected ? '#ff4d4f' : '#52c41a',
-                        }}
-                      />
-                      {obstacleStatus.closest_depth_distance && (
-                        <p style={{ marginTop: 4, fontSize: '11px' }}>
-                          距离: {obstacleStatus.closest_depth_distance.toFixed(2)}m
-                        </p>
-                      )}
-                    </Card>
-                  </Col>
-                </Row>
-
-                <div style={{ fontSize: '11px', color: '#999' }}>
-                  建议: {obstacleStatus.action === 'continue' ? '继续' : 
-                        obstacleStatus.action === 'slow' ? '减速' : '停止'}
+              ) : cameraImage ? (
+                <img 
+                  src={cameraImage} 
+                  alt="相机画面" 
+                  style={{ 
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    width: 'auto',
+                    height: 'auto',
+                    objectFit: 'contain',
+                    transform: 'translateZ(0)',
+                    willChange: 'transform',
+                    backfaceVisibility: 'hidden'
+                  }}
+                />
+              ) : (
+                <div style={{ 
+                  textAlign: 'center',
+                  padding: '40px'
+                }}>
+                  <EyeOutlined style={{ 
+                    fontSize: '64px', 
+                    color: enableCameraPreview ? '#666' : '#bfbfbf',
+                    marginBottom: '20px',
+                    display: 'block'
+                  }} />
+                  <div style={{ 
+                    color: enableCameraPreview ? '#999' : '#8c8c8c',
+                    fontSize: '18px',
+                    fontWeight: 500,
+                    marginBottom: '8px'
+                  }}>
+                    {enableCameraPreview ? '等待相机数据传输...' : '相机预览已关闭'}
+                  </div>
+                  <div style={{ 
+                    color: enableCameraPreview ? '#666' : '#bfbfbf',
+                    fontSize: '14px'
+                  }}>
+                    {enableCameraPreview ? '请稍候，正在连接相机' : '点击右上角开关开启预览'}
+                  </div>
                 </div>
+              )}
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 导航控制（如果有导航任务） */}
+      {navigationStatus && (
+        <Card 
+          title={<span style={{ fontSize: '16px', fontWeight: 600 }}>🧭 导航控制</span>}
+          style={{ 
+            marginTop: '16px',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.1)',
+            borderRadius: '8px',
+            border: 'none'
+          }}
+          styles={{ body: { padding: '20px' } }}
+        >
+          <Row gutter={[24, 16]}>
+            <Col xs={24} lg={8}>
+              <div style={{ 
+                padding: '20px',
+                backgroundColor: '#f5f5f5',
+                borderRadius: '8px',
+                height: '100%'
+              }}>
+                <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+                  导航进度
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 600, color: '#1890ff', marginBottom: '12px' }}>
+                  {navigationStatus.currentIndex + 1} / {navigationStatus.totalPoints}
+                </div>
+                <Progress
+                  percent={parseFloat(navigationStatus.progress.toFixed(2))}
+                  strokeColor={{
+                    '0%': '#108ee9',
+                    '100%': '#87d068',
+                  }}
+                  status={navigationStatus.status === 'running' ? 'active' : 'normal'}
+                />
+              </div>
+            </Col>
+            <Col xs={24} lg={8}>
+              {navigationStatus.currentPoint && (
+                <div style={{ 
+                  padding: '20px',
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: '8px',
+                  height: '100%'
+                }}>
+                  <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+                    当前目标点
+                  </div>
+                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#722ed1', marginBottom: '4px' }}>
+                    {navigationStatus.currentPoint.pointName}
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#999' }}>
+                    坐标: ({navigationStatus.currentPoint.position.x.toFixed(2)}, {navigationStatus.currentPoint.position.y.toFixed(2)})
+                  </div>
+                </div>
+              )}
+            </Col>
+            <Col xs={24} lg={8}>
+              <Space size="middle" style={{ width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
+                {navigationStatus.status === 'running' && (
+                  <Button
+                    size="large"
+                    icon={<PauseOutlined />}
+                    onClick={handlePause}
+                    loading={controlLoading}
+                    style={{ minWidth: '100px' }}
+                  >
+                    暂停导航
+                  </Button>
+                )}
+                {navigationStatus.status === 'paused' && (
+                  <Button
+                    size="large"
+                    type="primary"
+                    icon={<PlayCircleOutlined />}
+                    onClick={handleResume}
+                    loading={controlLoading}
+                    style={{ minWidth: '100px' }}
+                  >
+                    恢复导航
+                  </Button>
+                )}
+                {(navigationStatus.status === 'running' || navigationStatus.status === 'paused') && (
+                  <Button
+                    size="large"
+                    danger
+                    icon={<StopOutlined />}
+                    onClick={handleStop}
+                    loading={controlLoading}
+                    style={{ minWidth: '100px' }}
+                  >
+                    停止导航
+                  </Button>
+                )}
               </Space>
-            ) : (
-              <Alert
-                message="无检测数据"
-                description="障碍物检测系统未启动"
-                type="info"
-                showIcon
-                style={{ fontSize: '12px' }}
-              />
-            )}
-          </Card>
-        </Col>
-      </Row>
-
-      {/* 底部图表 */}
-      <Row gutter={[12, 12]} style={{ marginTop: '12px' }}>
-        <Col xs={24} lg={12}>
-          <Card title="电池监控" size="small" bodyStyle={{ padding: '12px' }}>
-            <Suspense fallback={<Loading type="skeleton" rows={4} />}>
-              <div style={{ height: '200px', width: '100%' }}>
-                <ReactECharts
-                  ref={batteryChartRef}
-                  option={{
-                    tooltip: {
-                      trigger: 'axis',
-                      formatter: '{b}: {c}%',
-                    },
-                    xAxis: {
-                      type: 'category',
-                      data: Array.from({ length: 15 }, (_, i) => `${i}s`),
-                      boundaryGap: false,
-                      axisLabel: { fontSize: 10 }
-                    },
-                    yAxis: {
-                      type: 'value',
-                      min: 0,
-                      max: 100,
-                      axisLabel: { formatter: '{value}%', fontSize: 10 }
-                    },
-                    series: [
-                      {
-                        name: '电池电量',
-                        type: 'line',
-                        data: Array.from({ length: 15 }, () => batteryLevel + Math.random() * 3 - 1.5),
-                        smooth: true,
-                        itemStyle: { color: '#52c41a' },
-                        lineStyle: { width: 2 }
-                      },
-                    ],
-                    grid: {
-                      left: '10%',
-                      right: '5%',
-                      bottom: '15%',
-                      containLabel: true,
-                    },
-                  }}
-                  style={{ height: '100%', width: '100%' }}
-                  notMerge={true}
-                  lazyUpdate={true}
-                />
-              </div>
-            </Suspense>
-          </Card>
-        </Col>
-
-        <Col xs={24} lg={12}>
-          <Card title="水位监控" size="small" bodyStyle={{ padding: '12px' }}>
-            <Suspense fallback={<Loading type="skeleton" rows={4} />}>
-              <div style={{ height: '200px', width: '100%' }}>
-                <ReactECharts
-                  ref={waterChartRef}
-                  option={{
-                    tooltip: {
-                      trigger: 'axis',
-                      formatter: '{b}: {c}%',
-                    },
-                    xAxis: {
-                      type: 'category',
-                      data: Array.from({ length: 15 }, (_, i) => `${i}s`),
-                      boundaryGap: false,
-                      axisLabel: { fontSize: 10 }
-                    },
-                    yAxis: {
-                      type: 'value',
-                      min: 0,
-                      max: 100,
-                      axisLabel: { formatter: '{value}%', fontSize: 10 }
-                    },
-                    series: [
-                      {
-                        name: '水位',
-                        type: 'line',
-                        data: Array.from({ length: 15 }, () => waterLevel + Math.random() * 3 - 1.5),
-                        smooth: true,
-                        itemStyle: { color: '#1890ff' },
-                        lineStyle: { width: 2 }
-                      },
-                    ],
-                    grid: {
-                      left: '10%',
-                      right: '5%',
-                      bottom: '15%',
-                      containLabel: true,
-                    },
-                  }}
-                  style={{ height: '100%', width: '100%' }}
-                  notMerge={true}
-                  lazyUpdate={true}
-                />
-              </div>
-            </Suspense>
-          </Card>
-        </Col>
-      </Row>
+            </Col>
+          </Row>
+        </Card>
+      )}
     </div>
   );
 };

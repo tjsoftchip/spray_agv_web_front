@@ -18,9 +18,7 @@ const SupplyManagement = lazy(() => import('./pages/SupplyManagement'));
 const MapManagement = lazy(() => import('./pages/MapManagement'));
 const SystemSettings = lazy(() => import('./pages/SystemSettings'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
-const ScheduleManagement = lazy(() => import('./pages/ScheduleManagement'));
 const StatusMonitor = lazy(() => import('./pages/StatusMonitor'));
-const NavigationMonitor = lazy(() => import('./pages/NavigationMonitor'));
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const token = localStorage.getItem('token');
@@ -47,11 +45,10 @@ const App: React.FC = () => {
                         <Route path="/tasks" element={<TaskManagement />} />
                         <Route path="/monitor" element={<StatusMonitor />} />
                         <Route path="/status" element={<StatusMonitor />} />
-                        <Route path="/navigation-monitor" element={<NavigationMonitor />} />
+                        <Route path="/status-monitor" element={<StatusMonitor />} />
                         <Route path="/maps" element={<MapManagement />} />
                         <Route path="/control" element={<DeviceControl />} />
                         <Route path="/supply" element={<SupplyManagement />} />
-                        <Route path="/schedules" element={<ScheduleManagement />} />
                         <Route path="/settings" element={<SystemSettings />} />
                         <Route path="/users" element={<UserManagement />} />
                       </Routes>

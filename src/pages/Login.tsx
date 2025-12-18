@@ -58,13 +58,15 @@ const Login: React.FC = () => {
           borderRadius: '12px',
           overflow: 'hidden'
         }}
-        headStyle={{ 
-          background: 'linear-gradient(to right, #667eea, #764ba2)',
-          color: 'white',
-          border: 'none',
-          padding: '20px 24px'
+        styles={{
+          header: { 
+            background: 'linear-gradient(to right, #667eea, #764ba2)',
+            color: 'white',
+            border: 'none',
+            padding: '20px 24px'
+          },
+          body: { padding: '32px 24px' }
         }}
-        bodyStyle={{ padding: '32px 24px' }}
       >
         <Form
           name="login"
