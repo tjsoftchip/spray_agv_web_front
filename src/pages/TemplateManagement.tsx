@@ -5,6 +5,7 @@ import { templateApi } from '../services/api';
 import NavigationPointManager from '../components/NavigationPointManager';
 import RoadSegmentManager from '../components/RoadSegmentManager';
 import PGMMapViewer from '../components/PGMMapViewer';
+import InitialPoseSetter from '../components/InitialPoseSetter';
 
 const { TextArea } = Input;
 
@@ -36,7 +37,9 @@ const TemplateManagement: React.FC = () => {
     setLoading(true);
     try {
       const data = await templateApi.getTemplates();
-      setTemplates(data);
+      // 确保 data 是数组，如果不是则使用空数组
+      const templatesData = Array.isArray(data) ? data : [];
+      setTemplates(templatesData);
       
       // 只有在 reloadSelected 为 true 且有选中的模板时，才重新加载选中的模板
       if (reloadSelected && selectedTemplate) {
@@ -51,7 +54,7 @@ const TemplateManagement: React.FC = () => {
         } catch (error) {
           console.error('Failed to reload selected template:', error);
           // 如果获取失败，尝试从列表中查找
-          const fallbackTemplate = data.find((t: any) => t.id === selectedTemplate.id);
+          const fallbackTemplate = templatesData.find((t: any) => t.id === selectedTemplate.id);
           if (fallbackTemplate) {
             setSelectedTemplate({
               ...fallbackTemplate,
@@ -62,7 +65,10 @@ const TemplateManagement: React.FC = () => {
         }
       }
     } catch (error: any) {
+      console.error('Load templates error:', error);
       message.error('加载模板列表失败');
+      // 发生错误时确保设置为空数组
+      setTemplates([]);
     } finally {
       setLoading(false);
     }
@@ -137,21 +143,10 @@ const TemplateManagement: React.FC = () => {
       key: 'yardName',
     },
     {
-      title: '梁场形状',
-      dataIndex: 'yardShape',
-      key: 'yardShape',
-      render: (shape: string) => shape === 'rectangle' ? '矩形' : '自定义',
-    },
-    {
-      title: '尺寸(长x宽)',
-      key: 'dimensions',
-      render: (_: any, record: any) => 
-        `${record.yardDimensions.length}m x ${record.yardDimensions.width}m`,
-    },
-    {
-      title: '版本',
-      dataIndex: 'version',
-      key: 'version',
+      title: '默认地图',
+      dataIndex: 'defaultMapId',
+      key: 'defaultMapId',
+      render: (mapId: string) => mapId || '未设置',
     },
     {
       title: '状态',
@@ -220,9 +215,7 @@ const TemplateManagement: React.FC = () => {
                       <p><strong>模板名称：</strong>{selectedTemplate.name}</p>
                       <p><strong>描述：</strong>{selectedTemplate.description || '无'}</p>
                       <p><strong>梁场名称：</strong>{selectedTemplate.yardName}</p>
-                      <p><strong>梁场形状：</strong>{selectedTemplate.yardShape === 'rectangle' ? '矩形' : '自定义'}</p>
-                      <p><strong>梁场尺寸：</strong>{selectedTemplate.yardDimensions.length}m x {selectedTemplate.yardDimensions.width}m</p>
-                      <p><strong>版本：</strong>{selectedTemplate.version}</p>
+                      <p><strong>默认地图：</strong>{selectedTemplate.defaultMapId || '未设置'}</p>
                       <p><strong>状态：</strong>{selectedTemplate.isActive ? '启用' : '禁用'}</p>
                     </Card>
                     <Card size="small" title="地图预览">
@@ -235,6 +228,18 @@ const TemplateManagement: React.FC = () => {
                       />
                     </Card>
                   </Space>
+                ),
+              },
+              {
+                key: 'initial-pose',
+                label: '初始位置设置',
+                children: (
+                  <InitialPoseSetter
+                    onPoseSet={(pose) => {
+                      console.log('Initial pose set:', pose);
+                      message.success('初始位置设置成功');
+                    }}
+                  />
                 ),
               },
               {
@@ -327,37 +332,6 @@ const TemplateManagement: React.FC = () => {
             <Input placeholder="请输入梁场名称" />
           </Form.Item>
 
-          <Form.Item
-            name="yardShape"
-            label="梁场形状"
-            rules={[{ required: true, message: '请选择梁场形状' }]}
-          >
-            <Select>
-              <Select.Option value="rectangle">矩形</Select.Option>
-              <Select.Option value="custom">自定义</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item label="梁场尺寸">
-            <Space>
-              <Form.Item
-                name={['yardDimensions', 'length']}
-                noStyle
-                rules={[{ required: true, message: '请输入长度' }]}
-              >
-                <InputNumber placeholder="长度(米)" min={1} />
-              </Form.Item>
-              <span>x</span>
-              <Form.Item
-                name={['yardDimensions', 'width']}
-                noStyle
-                rules={[{ required: true, message: '请输入宽度' }]}
-              >
-                <InputNumber placeholder="宽度(米)" min={1} />
-              </Form.Item>
-            </Space>
-          </Form.Item>
-
           <Form.Item name="defaultMapId" label="默认地图">
             <Select placeholder="选择默认地图" allowClear>
               {maps.map(map => (
@@ -366,10 +340,6 @@ const TemplateManagement: React.FC = () => {
                 </Select.Option>
               ))}
             </Select>
-          </Form.Item>
-
-          <Form.Item name="version" label="版本" initialValue="1.0">
-            <Input placeholder="版本号" />
           </Form.Item>
         </Form>
       </Modal>

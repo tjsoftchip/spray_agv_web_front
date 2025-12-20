@@ -7,6 +7,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSo
 import { CSS } from '@dnd-kit/utilities';
 import { taskApi, templateApi } from '../services/api';
 import dayjs from 'dayjs';
+import TemplateDragSelector from '../components/TemplateDragSelector';
 
 const { TextArea } = Input;
 
@@ -116,6 +117,16 @@ const SortableTaskCard: React.FC<SortableTaskCardProps> = ({
                   onClick={() => onExecute(task.id)}
                 >
                   执行
+                </Button>
+              )}
+              {(task.status === 'completed' || task.status === 'failed') && (
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<PlayCircleOutlined />}
+                  onClick={() => onExecute(task.id)}
+                >
+                  重新执行
                 </Button>
               )}
               {task.status === 'running' && (
@@ -291,6 +302,24 @@ const TaskManagement: React.FC = () => {
     }
   };
 
+  const handleGetCurrentPosition = async () => {
+    try {
+      const data = await apiService.get('/templates/robot/current-position');
+      
+      form.setFieldsValue({
+        ['initialPosition']: {
+          x: data.position.x,
+          y: data.position.y,
+          theta: data.orientation.theta || 0
+        }
+      });
+      
+      message.success('已获取当前机器人位置');
+    } catch (error) {
+      message.error('获取当前位置失败');
+    }
+  };
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
 
@@ -350,6 +379,33 @@ const TaskManagement: React.FC = () => {
     }
   };
 
+  const handleExecuteSequence = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/tasks/sequence/execute', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        message.success(data.message);
+        loadTasks();
+      } else {
+        message.error(data.error || '执行任务序列失败');
+      }
+    } catch (error) {
+      console.error('Execute sequence error:', error);
+      message.error('执行任务序列失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getQueueStatusTag = (status: string) => {
     const statusMap: any = {
       idle: { color: 'default', text: '空闲' },
@@ -384,9 +440,18 @@ const TaskManagement: React.FC = () => {
               创建任务
             </Button>
             {queueStatus === 'idle' && tasks.filter(t => t.status === 'pending').length > 0 && (
-              <Button icon={<PlayCircleOutlined />} onClick={handleStartQueue}>
-                开始执行队列
-              </Button>
+              <Space>
+                <Button icon={<PlayCircleOutlined />} onClick={handleStartQueue}>
+                  开始执行队列
+                </Button>
+                <Button 
+                  type="primary" 
+                  icon={<PlayCircleOutlined />} 
+                  onClick={handleExecuteSequence}
+                >
+                  执行任务序列
+                </Button>
+              </Space>
             )}
             {queueStatus === 'running' && (
               <Button icon={<PauseOutlined />} onClick={handlePauseQueue}>
@@ -422,7 +487,7 @@ const TaskManagement: React.FC = () => {
                   onResume={handleResume}
                   onStop={handleStop}
                   onDelete={handleDelete}
-                  onMonitor={() => navigate('/navigation-monitor')}
+                  onMonitor={() => navigate('/status-monitor')}
                 />
               ))}
             </SortableContext>
@@ -467,63 +532,164 @@ const TaskManagement: React.FC = () => {
             name="templateIds"
             label="操作模板"
             rules={[{ required: true, message: '请选择操作模板' }]}
+            extra="拖拽可调整执行顺序"
           >
-            <Select mode="multiple" placeholder="请选择操作模板">
-              {templates.map((t) => (
-                <Select.Option key={t.id} value={t.id}>
-                  {t.name}
-                </Select.Option>
-              ))}
+            <TemplateDragSelector templates={templates} />
+          </Form.Item>
+
+          
+
+          <Form.Item
+            name="operationType"
+            label="操作频率"
+            rules={[{ required: true, message: '请选择操作频率' }]}
+            initialValue="single"
+          >
+            <Select style={{ width: 200 }}>
+              <Select.Option value="single">单次执行</Select.Option>
+              <Select.Option value="scheduled">定时执行</Select.Option>
             </Select>
           </Form.Item>
 
-          <Form.Item name="transitionSequence" label="梁场过渡顺序">
-            <Select mode="tags" placeholder="输入梁场ID并回车" />
+          <Form.Item
+            noStyle
+            shouldUpdate={(prevValues, currentValues) => prevValues.operationType !== currentValues.operationType}
+          >
+            {({ getFieldValue }) => {
+              return getFieldValue('operationType') === 'scheduled' ? (
+                <Form.Item label="定时策略">
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Form.Item
+                      name={['scheduleConfig', 'type']}
+                      label="执行周期"
+                      initialValue="daily"
+                    >
+                      <Select style={{ width: 200 }}>
+                        <Select.Option value="once">单次定时</Select.Option>
+                        <Select.Option value="daily">每天</Select.Option>
+                        <Select.Option value="weekly">每周</Select.Option>
+                      </Select>
+                    </Form.Item>
+                    
+                    <Form.Item
+                      name={['scheduleConfig', 'time']}
+                      label="执行时间"
+                      initialValue={dayjs('09:00', 'HH:mm')}
+                    >
+                      <TimePicker format="HH:mm" style={{ width: 200 }} />
+                    </Form.Item>
+                    
+                    <Form.Item
+                      noStyle
+                      shouldUpdate={(prevValues, currentValues) => 
+                        prevValues.scheduleConfig?.type !== currentValues.scheduleConfig?.type
+                      }
+                    >
+                      {({ getFieldValue }) => {
+                        const scheduleType = getFieldValue(['scheduleConfig', 'type']);
+                        return scheduleType === 'weekly' ? (
+                          <Form.Item
+                            name={['scheduleConfig', 'weekdays']}
+                            label="选择星期"
+                            initialValue={[1, 2, 3, 4, 5]}
+                          >
+                            <Checkbox.Group>
+                              <Checkbox value={1}>周一</Checkbox>
+                              <Checkbox value={2}>周二</Checkbox>
+                              <Checkbox value={3}>周三</Checkbox>
+                              <Checkbox value={4}>周四</Checkbox>
+                              <Checkbox value={5}>周五</Checkbox>
+                              <Checkbox value={6}>周六</Checkbox>
+                              <Checkbox value={0}>周日</Checkbox>
+                            </Checkbox.Group>
+                          </Form.Item>
+                        ) : null;
+                      }}
+                    </Form.Item>
+                  </Space>
+                </Form.Item>
+              ) : null;
+            }}
           </Form.Item>
 
-          <Form.Item label="操作频率">
-            <Space>
+          <Form.Item label="初始位置设置">
+            <Space direction="vertical" style={{ width: '100%' }}>
               <Form.Item
-                name={['operationFrequency', 'type']}
-                noStyle
-                initialValue="daily"
+                name={['initialPosition', 'x']}
+                label="X坐标 (米)"
+                initialValue={0}
               >
-                <Select style={{ width: 120 }}>
-                  <Select.Option value="daily">每天</Select.Option>
-                  <Select.Option value="weekly">每周</Select.Option>
-                  <Select.Option value="custom">自定义</Select.Option>
-                </Select>
+                <InputNumber step={0.1} precision={3} style={{ width: '100%' }} />
               </Form.Item>
-              <Form.Item name={['operationFrequency', 'interval']} noStyle initialValue={1}>
-                <InputNumber min={1} placeholder="间隔" />
+              <Form.Item
+                name={['initialPosition', 'y']}
+                label="Y坐标 (米)"
+                initialValue={0}
+              >
+                <InputNumber step={0.1} precision={3} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item
+                name={['initialPosition', 'theta']}
+                label="方向角 (弧度)"
+                initialValue={0}
+              >
+                <InputNumber step={0.1} precision={3} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item>
+                <Space>
+                  <Button 
+                    type="dashed"
+                    onClick={handleGetCurrentPosition}
+                  >
+                    使用当前位置
+                  </Button>
+                  <Button 
+                    type="dashed"
+                    onClick={() => form.setFieldsValue({
+                      initialPosition: {
+                        x: 0,
+                        y: 0,
+                        theta: 0
+                      }
+                    })}
+                  >
+                    重置为原点
+                  </Button>
+                  <Button 
+                    type="dashed"
+                    onClick={() => form.setFieldsValue({
+                      initialPosition: {
+                        ...form.getFieldValue('initialPosition'),
+                        theta: 0
+                      }
+                    })}
+                  >
+                    朝向 0°
+                  </Button>
+                  <Button 
+                    type="dashed"
+                    onClick={() => form.setFieldsValue({
+                      initialPosition: {
+                        ...form.getFieldValue('initialPosition'),
+                        theta: Math.PI / 2
+                      }
+                    })}
+                  >
+                    朝向 90°
+                  </Button>
+                </Space>
               </Form.Item>
             </Space>
           </Form.Item>
 
           <Form.Item label="执行参数">
-            <Space orientation="vertical" style={{ width: '100%' }}>
-              <Form.Item
-                name={['executionParams', 'operationSpeed']}
-                label="作业速度(m/s)"
-                initialValue={0.35}
-              >
-                <InputNumber min={0.1} max={1} step={0.05} style={{ width: '100%' }} />
-              </Form.Item>
-              <Form.Item
-                name={['executionParams', 'sprayDuration']}
-                label="喷淋时长(秒)"
-                initialValue={300}
-              >
-                <InputNumber min={1} style={{ width: '100%' }} />
-              </Form.Item>
-              <Form.Item
-                name={['executionParams', 'repeatCount']}
-                label="重复次数"
-                initialValue={1}
-              >
-                <InputNumber min={1} style={{ width: '100%' }} />
-              </Form.Item>
-            </Space>
+            <Form.Item
+              name={['executionParams', 'operationSpeed']}
+              label="作业速度(m/s)"
+              initialValue={0.35}
+            >
+              <InputNumber min={0.1} max={1} step={0.05} style={{ width: '100%' }} />
+            </Form.Item>
           </Form.Item>
         </Form>
       </Modal>

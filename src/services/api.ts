@@ -163,6 +163,35 @@ export const supplyStationApi = {
   deleteStation: (id: string) => apiService.delete(`/supply/stations/${id}`),
 };
 
+export const supplyManagementApi = {
+  // GPU监控
+  getGPUMetrics: () => apiService.get('/supply/management/gpu/metrics'),
+  
+  // 补给管理
+  getSupplyStatus: () => apiService.get('/supply/management/supply/status'),
+  startSupply: () => apiService.post('/supply/management/supply/start'),
+  pauseSupply: () => apiService.post('/supply/management/supply/pause'),
+  resumeSupply: () => apiService.post('/supply/management/supply/resume'),
+  stopSupply: () => apiService.post('/supply/management/supply/stop'),
+  
+  // 任务管理
+  createTask: () => apiService.post('/supply/management/task/create'),
+  startTask: () => apiService.post('/supply/management/task/start'),
+  pauseTask: () => apiService.post('/supply/management/task/pause'),
+  resumeTask: () => apiService.post('/supply/management/task/resume'),
+  saveTask: () => apiService.post('/supply/management/task/save'),
+  loadTask: () => apiService.post('/supply/management/task/load'),
+  stopTask: () => apiService.post('/supply/management/task/stop'),
+  getTaskPath: () => apiService.get('/supply/management/task/path'),
+  
+  // 手动控制
+  manualControl: (data: any) => apiService.post('/supply/management/control/manual', data),
+  
+  // 系统监控
+  getSystemMetrics: () => apiService.get('/supply/management/system/metrics'),
+  getNodeStatus: () => apiService.get('/supply/management/system/nodes'),
+};
+
 export const robotApi = {
   getStatus: () => apiService.get('/robot/status'),
   controlMotion: (data: any) => apiService.post('/robot/motion/teleop', data),

@@ -55,7 +55,6 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
     form.setFieldsValue({
       type: 'waypoint',
       position: { x: 0, y: 0, z: 0 },
-      orientation: { x: 0, y: 0, z: 0, w: 1 },
       order: navigationPoints.length + 1,
     });
     setModalVisible(true);
@@ -135,7 +134,6 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
       
       form.setFieldsValue({
         position: data.position,
-        orientation: data.orientation,
       });
       
       setRobotPosition(data.position);
@@ -364,25 +362,7 @@ const NavigationPointManager: React.FC<NavigationPointManagerProps> = ({ templat
             </Row>
           </Form.Item>
 
-          <Form.Item 
-            label="朝向(四元数)"
-            extra="四元数表示机器人的朝向，X/Y/Z为旋转轴分量，W为旋转角度分量。通常保持X=Y=0，Z和W满足 Z²+W²=1。例如：朝东(0,0,0,1)，朝北(0,0,0.707,0.707)，朝西(0,0,1,0)，朝南(0,0,-0.707,0.707)"
-          >
-            <Space>
-              <Form.Item name={['orientation', 'x']} noStyle>
-                <InputNumber placeholder="X" step={0.1} style={{ width: 100 }} />
-              </Form.Item>
-              <Form.Item name={['orientation', 'y']} noStyle>
-                <InputNumber placeholder="Y" step={0.1} style={{ width: 100 }} />
-              </Form.Item>
-              <Form.Item name={['orientation', 'z']} noStyle>
-                <InputNumber placeholder="Z" step={0.1} style={{ width: 100 }} />
-              </Form.Item>
-              <Form.Item name={['orientation', 'w']} noStyle>
-                <InputNumber placeholder="W" step={0.1} style={{ width: 100 }} />
-              </Form.Item>
-            </Space>
-          </Form.Item>
+          
 
           <Form.Item name="order" label="顺序" rules={[{ required: true }]}>
             <InputNumber min={1} style={{ width: '100%' }} />
