@@ -17,6 +17,7 @@ const DeviceControl: React.FC = () => {
   const [isMoving, setIsMoving] = useState(false);
   const velocityIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [maxSpeed, setMaxSpeed] = useState(1.0); // 默认最大速度1.0m/s
+  const [isJoystickActive, setIsJoystickActive] = useState(true); // 手柄激活状态
 
   useEffect(() => {
     socketService.connect();
@@ -54,9 +55,7 @@ const DeviceControl: React.FC = () => {
     });
     
     return () => {
-      if (controlMode === 'manual') {
-        stopVelocityPublishing();
-      }
+      stopVelocityPublishing();
       
       // 取消话题声明
       socketService.sendRosCommand({
@@ -66,7 +65,7 @@ const DeviceControl: React.FC = () => {
       
       socketService.disconnect();
     };
-  }, [controlMode]);
+  }, []);
 
   const publishRosCommand = (topic: string, msgType: string, msg: any) => {
     socketService.sendRosCommand({
@@ -129,7 +128,6 @@ const DeviceControl: React.FC = () => {
       angular: { x: 0.0, y: 0.0, z: 0.0 }
     };
     publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
-    publishRosCommand('/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
     
     message.warning('紧急停止已触发');
   };
@@ -160,14 +158,12 @@ const DeviceControl: React.FC = () => {
     console.log('Sending twist message:', twistMessage);
     // 使用专门的web_cmd_vel话题，避免与手柄控制冲突
     publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
-    // 同时也发送到原话题，尝试覆盖
-    publishRosCommand('/cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
     
-    // 设置定时器，提高发送频率到50ms，以覆盖其他节点的命令
+    // 定时发送速度指令，确保持续控制
     velocityIntervalRef.current = setInterval(() => {
       console.log('Continuously sending twist message:', twistMessage);
-      publishRosCommand('/cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
-    }, 50);
+      publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
+    }, 100); // 每100ms发送一次
   };
 
   const stopVelocityPublishing = () => {
@@ -187,12 +183,9 @@ const DeviceControl: React.FC = () => {
     };
     console.log('Sending stop message:', stopMessage);
     publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
-    publishRosCommand('/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
   };
 
   const handleJoystickMove = (event: any) => {
-    if (controlMode !== 'manual') return;
-    
     // 使用设定的最大速度值
     const maxLinear = maxSpeed;  // 线速度最大值
     const maxAngular = maxSpeed; // 角速度最大值
@@ -225,76 +218,191 @@ const DeviceControl: React.FC = () => {
     
     // 停止发送速度命令
     stopVelocityPublishing();
+    
+    // 确保停止命令发送成功，发送多次停止命令
+    const stopMessage = {
+      linear: { x: 0.0, y: 0.0, z: 0.0 },
+      angular: { x: 0.0, y: 0.0, z: 0.0 }
+    };
+    
+    // 立即发送一次停止命令
+    publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
+    
+    // 延迟再发送两次，确保停止命令可靠到达
+    setTimeout(() => {
+      publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
+    }, 50);
+    
+    setTimeout(() => {
+      publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
+    }, 100);
+  };
+
+  // 切换手柄激活状态
+  const toggleJoystickActive = () => {
+    setIsJoystickActive(!isJoystickActive);
+    if (isJoystickActive) {
+      message.warning('手柄控制已禁用');
+      // 立即停止所有速度指令
+      handleEmergencyStop();
+    } else {
+      message.success('手柄控制已启用');
+    }
   };
 
   return (
-    <div>
-      <Card 
-        title="控制模式" 
-        style={{ marginBottom: 16 }}
-        extra={
-          <Tag color={controlMode === 'auto' ? 'green' : 'orange'}>
-            {controlMode === 'auto' ? '自动模式' : '手动模式'}
-          </Tag>
-        }
-      >
-        <Space size="large">
-          <Button 
-            type={controlMode === 'auto' ? 'primary' : 'default'}
-            onClick={() => handleModeSwitch('auto')}
-          >
-            自动控制
-          </Button>
-          <Button 
-            type={controlMode === 'manual' ? 'primary' : 'default'}
-            onClick={() => handleModeSwitch('manual')}
-          >
-            手动控制
-          </Button>
-        </Space>
-      </Card>
-
-      {controlMode === 'manual' && (
-        <Card title="虚拟摇杆" style={{ marginBottom: 16 }}>
-          <Row gutter={16}>
+      <div>
+        <Card 
+          title="虚拟摇杆控制" 
+          style={{ 
+            marginBottom: 24,
+            borderRadius: 12,
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)'
+          }}
+          styles={{
+            header: {
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              color: 'white',
+              borderRadius: '12px 12px 0 0',
+              border: 'none'
+            }
+          }}
+        >
+          <Row gutter={[24, 24]}>
             <Col xs={24} md={12}>
               <div style={{ 
                 display: 'flex', 
                 flexDirection: 'column', 
                 alignItems: 'center',
-                padding: '20px'
+                padding: '24px',
+                background: '#f8f9fa',
+                borderRadius: 8
               }}>
                 <Joystick
-                  size={150}
-                  baseColor="#d0d0d0"
-                  stickColor="#1890ff"
+                  size={180}
+                  baseColor="#e9ecef"
+                  stickColor="#667eea"
                   move={handleJoystickMove}
                   stop={handleJoystickStop}
                   throttle={50}
                   options={{
                     mode: 'static',
                     position: { x: '50%', y: '50%' },
-                    color: '#1890ff'
+                    color: '#667eea'
                   }}
                 />
-                <div style={{ marginTop: 20, textAlign: 'center' }}>
-                  <p>线速度: {velocity.linear.toFixed(2)} m/s</p>
-                  <p>角速度: {velocity.angular.toFixed(2)} rad/s</p>
+                <div style={{ 
+                  marginTop: 24, 
+                  textAlign: 'center',
+                  background: 'white',
+                  padding: '16px 24px',
+                  borderRadius: 8,
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                  width: '100%'
+                }}>
+                  <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+                    当前速度状态
+                  </div>
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-around',
+                    color: '#495057'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 12, color: '#6c757d' }}>线速度</div>
+                      <div style={{ fontSize: 18, fontWeight: 'bold', color: '#667eea' }}>
+                        {velocity.linear.toFixed(2)} m/s
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, color: '#6c757d' }}>角速度</div>
+                      <div style={{ fontSize: 18, fontWeight: 'bold', color: '#764ba2' }}>
+                        {velocity.angular.toFixed(2)} rad/s
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* 手柄激活切换按键 */}
+                <div style={{ 
+                  marginTop: 20,
+                  textAlign: 'center',
+                  background: isJoystickActive ? '#d4edda' : '#f8d7da',
+                  padding: '16px 24px',
+                  borderRadius: 8,
+                  border: `2px solid ${isJoystickActive ? '#c3e6cb' : '#f5c6cb'}`,
+                  width: '100%'
+                }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: isJoystickActive ? '#155724' : '#721c24' }}>
+                    🎮 手柄控制状态
+                  </div>
+                  <Button
+                    type={isJoystickActive ? 'primary' : 'default'}
+                    size="large"
+                    onClick={toggleJoystickActive}
+                    style={{
+                      backgroundColor: isJoystickActive ? '#28a745' : '#6c757d',
+                      borderColor: isJoystickActive ? '#28a745' : '#6c757d',
+                      color: 'white',
+                      fontWeight: 600,
+                      minWidth: 120,
+                      height: 40,
+                      borderRadius: 6,
+                      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                    }}
+                  >
+                    {isJoystickActive ? '🟢 启用中' : '🔴 已禁用'}
+                  </Button>
+                  <div style={{ 
+                    fontSize: 12, 
+                    marginTop: 8,
+                    color: isJoystickActive ? '#155724' : '#721c24'
+                  }}>
+                    {isJoystickActive ? '手柄控制正常工作' : '手柄控制已禁用，按键无响应'}
+                  </div>
                 </div>
               </div>
             </Col>
             <Col xs={24} md={12}>
-              <div style={{ padding: '20px' }}>
-                <h4>操作说明：</h4>
-                <ul>
-                  <li>向上推动摇杆：前进</li>
-                  <li>向下推动摇杆：后退</li>
-                  <li>向左推动摇杆：左转</li>
-                  <li>向右推动摇杆：右转</li>
-                  <li>松开摇杆：停止</li>
-                </ul>
-                <div style={{ marginBottom: 20 }}>
-                  <label style={{ display: 'block', marginBottom: 8 }}>最大移动速度 (m/s):</label>
+              <div style={{ padding: '24px' }}>
+                <div style={{ 
+                  marginBottom: 24,
+                  background: '#f8f9fa',
+                  padding: '16px',
+                  borderRadius: 8
+                }}>
+                  <h4 style={{ 
+                    margin: '0 0 12px 0',
+                    color: '#495057',
+                    fontSize: 16,
+                    fontWeight: 600
+                  }}>
+                    🎮 操作说明
+                  </h4>
+                  <ul style={{ 
+                    margin: 0,
+                    paddingLeft: 20,
+                    color: '#6c757d',
+                    fontSize: 14
+                  }}>
+                    <li style={{ marginBottom: 8 }}>向上推动摇杆：前进</li>
+                    <li style={{ marginBottom: 8 }}>向下推动摇杆：后退</li>
+                    <li style={{ marginBottom: 8 }}>向左推动摇杆：左转</li>
+                    <li style={{ marginBottom: 8 }}>向右推动摇杆：右转</li>
+                    <li>松开摇杆：停止</li>
+                  </ul>
+                </div>
+                
+                <div style={{ marginBottom: 24 }}>
+                  <label style={{ 
+                    display: 'block', 
+                    marginBottom: 12,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: '#495057'
+                  }}>
+                    ⚡ 最大移动速度 (m/s)
+                  </label>
                   <InputNumber
                     min={0.1}
                     max={3.0}
@@ -303,54 +411,147 @@ const DeviceControl: React.FC = () => {
                     onChange={(value) => {
                       if (value) {
                         setMaxSpeed(value);
-                        message.info(`最大速度已设置为 ${value} m/s`);
+                        message.success(`最大速度已设置为 ${value} m/s`);
                       }
                     }}
-                    style={{ width: '100%' }}
+                    style={{ 
+                      width: '100%',
+                      height: 40,
+                      borderRadius: 8
+                    }}
                   />
                 </div>
+                
                 <Button 
                   danger 
                   size="large" 
                   block 
                   onClick={handleEmergencyStop}
-                  style={{ marginTop: 10 }}
+                  style={{ 
+                    height: 48,
+                    borderRadius: 8,
+                    fontWeight: 600,
+                    fontSize: 16,
+                    background: '#ff4d4f',
+                    border: 'none',
+                    boxShadow: '0 4px 15px rgba(255, 77, 79, 0.3)'
+                  }}
                 >
-                  紧急停止
+                  🛑 紧急停止
                 </Button>
               </div>
             </Col>
           </Row>
         </Card>
-      )}
 
-      <h2>设备控制</h2>
+      <h2 style={{ 
+        marginBottom: 24,
+        fontSize: 24,
+        fontWeight: 700,
+        color: '#2c3e50',
+        textAlign: 'center'
+      }}>
+        🚜 设备控制
+      </h2>
 
-      <div className={orientation === 'landscape' ? 'control-panel-landscape' : 'layout-portrait'}>
-        <div className={orientation === 'landscape' ? '' : ''}>
-          <Row gutter={[16, 16]}>
-            <Col xs={24} lg={orientation === 'landscape' ? 24 : 12}>
-              <Card title="水泵控制" variant="borderless">
-                <Space orientation="vertical" style={{ width: '100%' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '16px' }}>水泵状态</span>
-                    <Switch
-                      checked={pumpStatus}
-                      onChange={handlePumpToggle}
-                      checkedChildren="开"
-                      unCheckedChildren="关"
-                      size="default"
-                    />
+      <div style={{ padding: '0 8px' }}>
+        <Row gutter={[24, 24]}>
+          <Col xs={24} lg={12}>
+              <Card 
+                title="💧 水泵控制" 
+                style={{ 
+                  borderRadius: 12,
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                  border: 'none'
+                }}
+                styles={{
+                  header: {
+                    background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+                    color: 'white',
+                    borderRadius: '12px 12px 0 0',
+                    border: 'none',
+                    fontSize: 16,
+                    fontWeight: 600
+                  }
+                }}
+              >
+                <div style={{ 
+                  padding: '20px 0',
+                  background: '#f8f9fa',
+                  borderRadius: 8,
+                  textAlign: 'center'
+                }}>
+                  <div style={{ 
+                    marginBottom: 16,
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: '#495057'
+                  }}>
+                    水泵状态
                   </div>
-                </Space>
+                  <Switch
+                    checked={pumpStatus}
+                    onChange={handlePumpToggle}
+                    checkedChildren="开"
+                    unCheckedChildren="关"
+                    size="default"
+                    style={{
+                      transform: 'scale(1.2)'
+                    }}
+                  />
+                  <div style={{ 
+                    marginTop: 12,
+                    fontSize: 14,
+                    color: pumpStatus ? '#28a745' : '#6c757d',
+                    fontWeight: 500
+                  }}>
+                    {pumpStatus ? '🟢 水泵正在运行' : '🔴 水泵已停止'}
+                  </div>
+                </div>
               </Card>
             </Col>
 
-            <Col xs={24} lg={orientation === 'landscape' ? 24 : 12}>
-              <Card title="支架高度" variant="borderless">
-                <div>
-                  <div style={{ marginBottom: 16 }}>
-                    <span style={{ fontSize: '16px' }}>当前高度: {armHeight.toFixed(2)} 米</span>
+            <Col xs={24} lg={12}>
+              <Card 
+                title="📏 支架高度" 
+                style={{ 
+                  borderRadius: 12,
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                  border: 'none'
+                }}
+                styles={{
+                  header: {
+                    background: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
+                    color: 'white',
+                    borderRadius: '12px 12px 0 0',
+                    border: 'none',
+                    fontSize: 16,
+                    fontWeight: 600
+                  }
+                }}
+              >
+                <div style={{ padding: '20px 0' }}>
+                  <div style={{ 
+                    marginBottom: 24,
+                    textAlign: 'center',
+                    background: '#f8f9fa',
+                    padding: '16px',
+                    borderRadius: 8
+                  }}>
+                    <div style={{ 
+                      fontSize: 14,
+                      color: '#6c757d',
+                      marginBottom: 8
+                    }}>
+                      当前高度
+                    </div>
+                    <div style={{ 
+                      fontSize: 24,
+                      fontWeight: 'bold',
+                      color: '#fa709a'
+                    }}>
+                      {armHeight.toFixed(2)} 米
+                    </div>
                   </div>
                   <Slider
                     min={0.5}
@@ -365,101 +566,231 @@ const DeviceControl: React.FC = () => {
                       2.0: '2.0m',
                       2.5: '2.5m',
                     }}
+                    trackStyle={{
+                      background: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
+                    }}
+                    handleStyle={{
+                      borderColor: '#fa709a',
+                      boxShadow: '0 0 10px rgba(250, 112, 154, 0.5)'
+                    }}
                   />
                 </div>
               </Card>
             </Col>
 
-            <Col xs={24} lg={orientation === 'landscape' ? 24 : 12}>
-              <Card title="左侧展臂控制" variant="borderless">
-                <Space orientation="vertical" style={{ width: '100%' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>展臂状态: {leftArmStatus === 'open' ? '打开' : '关闭'}</span>
-                    <Space>
+            <Col xs={24} lg={12}>
+              <Card 
+                title="🦾 左侧展臂控制" 
+                style={{ 
+                  borderRadius: 12,
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                  border: 'none'
+                }}
+                styles={{
+                  header: {
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    color: 'white',
+                    borderRadius: '12px 12px 0 0',
+                    border: 'none',
+                    fontSize: 16,
+                    fontWeight: 600
+                  }
+                }}
+              >
+                <Space orientation="vertical" style={{ width: '100%' }} size="large">
+                  <div style={{ 
+                    background: '#f8f9fa',
+                    padding: '16px',
+                    borderRadius: 8,
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ 
+                      marginBottom: 16,
+                      fontSize: 16,
+                      fontWeight: 600,
+                      color: '#495057'
+                    }}>
+                      展臂状态
+                    </div>
+                    <Space size="large">
                       <Button
                         type={leftArmStatus === 'open' ? 'primary' : 'default'}
                         onClick={() => handleArmControl('left', 'open')}
+                        style={{
+                          borderRadius: 8,
+                          height: 40,
+                          width: 80,
+                          fontWeight: 600
+                        }}
                       >
                         打开
                       </Button>
                       <Button
                         type={leftArmStatus === 'close' ? 'primary' : 'default'}
                         onClick={() => handleArmControl('left', 'close')}
+                        style={{
+                          borderRadius: 8,
+                          height: 40,
+                          width: 80,
+                          fontWeight: 600
+                        }}
                       >
                         关闭
                       </Button>
                     </Space>
+                    <div style={{ 
+                      marginTop: 12,
+                      fontSize: 14,
+                      color: leftArmStatus === 'open' ? '#28a745' : '#6c757d',
+                      fontWeight: 500
+                    }}>
+                      {leftArmStatus === 'open' ? '🟢 展臂已打开' : '🔴 展臂已关闭'}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
-                    <span>水阀状态</span>
+                  
+                  <div style={{ 
+                    background: '#f8f9fa',
+                    padding: '16px',
+                    borderRadius: 8,
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ 
+                      marginBottom: 16,
+                      fontSize: 16,
+                      fontWeight: 600,
+                      color: '#495057'
+                    }}>
+                      水阀状态
+                    </div>
                     <Switch
                       checked={leftValveStatus}
                       onChange={(checked) => handleValveToggle('left', checked)}
                       checkedChildren="开"
                       unCheckedChildren="关"
+                      style={{
+                        transform: 'scale(1.2)'
+                      }}
                     />
+                    <div style={{ 
+                      marginTop: 12,
+                      fontSize: 14,
+                      color: leftValveStatus ? '#28a745' : '#6c757d',
+                      fontWeight: 500
+                    }}>
+                      {leftValveStatus ? '🟢 水阀已开启' : '🔴 水阀已关闭'}
+                    </div>
                   </div>
                 </Space>
               </Card>
             </Col>
 
-            <Col xs={24} lg={orientation === 'landscape' ? 24 : 12}>
-              <Card title="右侧展臂控制" variant="borderless">
-                <Space orientation="vertical" style={{ width: '100%' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>展臂状态: {rightArmStatus === 'open' ? '打开' : '关闭'}</span>
-                    <Space>
+            <Col xs={24} lg={12}>
+              <Card 
+                title="🦾 右侧展臂控制" 
+                style={{ 
+                  borderRadius: 12,
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                  border: 'none'
+                }}
+                styles={{
+                  header: {
+                    background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                    color: 'white',
+                    borderRadius: '12px 12px 0 0',
+                    border: 'none',
+                    fontSize: 16,
+                    fontWeight: 600
+                  }
+                }}
+              >
+                <Space orientation="vertical" style={{ width: '100%' }} size="large">
+                  <div style={{ 
+                    background: '#f8f9fa',
+                    padding: '16px',
+                    borderRadius: 8,
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ 
+                      marginBottom: 16,
+                      fontSize: 16,
+                      fontWeight: 600,
+                      color: '#495057'
+                    }}>
+                      展臂状态
+                    </div>
+                    <Space size="large">
                       <Button
                         type={rightArmStatus === 'open' ? 'primary' : 'default'}
                         onClick={() => handleArmControl('right', 'open')}
+                        style={{
+                          borderRadius: 8,
+                          height: 40,
+                          width: 80,
+                          fontWeight: 600
+                        }}
                       >
                         打开
                       </Button>
                       <Button
                         type={rightArmStatus === 'close' ? 'primary' : 'default'}
                         onClick={() => handleArmControl('right', 'close')}
+                        style={{
+                          borderRadius: 8,
+                          height: 40,
+                          width: 80,
+                          fontWeight: 600
+                        }}
                       >
                         关闭
                       </Button>
                     </Space>
+                    <div style={{ 
+                      marginTop: 12,
+                      fontSize: 14,
+                      color: rightArmStatus === 'open' ? '#28a745' : '#6c757d',
+                      fontWeight: 500
+                    }}>
+                      {rightArmStatus === 'open' ? '🟢 展臂已打开' : '🔴 展臂已关闭'}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
-                    <span>水阀状态</span>
+                  
+                  <div style={{ 
+                    background: '#f8f9fa',
+                    padding: '16px',
+                    borderRadius: 8,
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ 
+                      marginBottom: 16,
+                      fontSize: 16,
+                      fontWeight: 600,
+                      color: '#495057'
+                    }}>
+                      水阀状态
+                    </div>
                     <Switch
                       checked={rightValveStatus}
                       onChange={(checked) => handleValveToggle('right', checked)}
                       checkedChildren="开"
                       unCheckedChildren="关"
+                      style={{
+                        transform: 'scale(1.2)'
+                      }}
                     />
+                    <div style={{ 
+                      marginTop: 12,
+                      fontSize: 14,
+                      color: rightValveStatus ? '#28a745' : '#6c757d',
+                      fontWeight: 500
+                    }}>
+                      {rightValveStatus ? '🟢 水阀已开启' : '🔴 水阀已关闭'}
+                    </div>
                   </div>
                 </Space>
               </Card>
             </Col>
           </Row>
-        </div>
-
-        {orientation === 'landscape' && (
-          <div>
-            <Card title="实时监控" variant="borderless" style={{ height: '100%' }}>
-              <Space orientation="vertical" style={{ width: '100%' }} size="large">
-                <div>
-                  <Tag color="blue">控制模式: {controlMode === 'auto' ? '自动' : '手动'}</Tag>
-                  <Tag color={pumpStatus ? 'green' : 'default'}>水泵: {pumpStatus ? '运行' : '停止'}</Tag>
                 </div>
-                <div>
-                  <div style={{ marginBottom: 8 }}>线速度: {velocity.linear.toFixed(2)} m/s</div>
-                  <div>角速度: {velocity.angular.toFixed(2)} rad/s</div>
-                </div>
-                <div style={{ color: '#999', fontSize: 14 }}>
-                  <div>• 实时监控机器人状态</div>
-                  <div>• 显示传感器数据</div>
-                  <div>• 查看设备运行参数</div>
-                </div>
-              </Space>
-            </Card>
-          </div>
-        )}
-      </div>
     </div>
   );
 };

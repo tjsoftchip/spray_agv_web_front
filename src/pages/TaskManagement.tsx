@@ -441,15 +441,20 @@ const TaskManagement: React.FC = () => {
             </Button>
             {queueStatus === 'idle' && tasks.filter(t => t.status === 'pending').length > 0 && (
               <Space>
-                <Button icon={<PlayCircleOutlined />} onClick={handleStartQueue}>
-                  开始执行队列
+                <Button 
+                  icon={<PlayCircleOutlined />} 
+                  onClick={handleStartQueue}
+                  title="只执行第一个待执行任务"
+                >
+                  执行首个任务
                 </Button>
                 <Button 
                   type="primary" 
                   icon={<PlayCircleOutlined />} 
                   onClick={handleExecuteSequence}
+                  title="按顺序执行所有待执行任务"
                 >
-                  执行任务序列
+                  执行全部序列
                 </Button>
               </Space>
             )}

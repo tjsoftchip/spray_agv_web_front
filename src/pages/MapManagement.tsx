@@ -389,10 +389,10 @@ const MapManagement: React.FC = () => {
       message.destroy(); // 关闭loading
       message.success('开始建图');
       
-      // 延迟1秒后再检查状态，确保后端状态已更新
+      // 延迟2秒后再检查状态，确保后端状态已更新
       setTimeout(() => {
         checkMappingStatus();
-      }, 1000);
+      }, 2000);
     } catch (error: any) {
       message.destroy(); // 关闭loading
       console.error('启动建图失败:', error);
