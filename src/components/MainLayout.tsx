@@ -15,6 +15,7 @@ import {
   MonitorOutlined,
   ExclamationCircleOutlined,
   ReloadOutlined,
+  BranchesOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -99,6 +100,11 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       key: '/maps',
       icon: <FileTextOutlined />,
       label: '地图管理',
+    },
+    {
+      key: '/path-generator',
+      icon: <BranchesOutlined />,
+      label: '路径自动生成',
     },
     {
       key: '/control',

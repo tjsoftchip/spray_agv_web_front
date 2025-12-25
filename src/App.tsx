@@ -16,6 +16,7 @@ const TaskQueue = lazy(() => import('./pages/TaskQueue'));
 const DeviceControl = lazy(() => import('./pages/DeviceControl'));
 const SupplyManagement = lazy(() => import('./pages/SupplyManagement'));
 const MapManagement = lazy(() => import('./pages/MapManagement'));
+const PathAutoGenerator = lazy(() => import('./pages/PathAutoGenerator'));
 const SystemSettings = lazy(() => import('./pages/SystemSettings'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
 const StatusMonitor = lazy(() => import('./pages/StatusMonitor'));
@@ -48,6 +49,7 @@ const App: React.FC = () => {
                         <Route path="/status" element={<StatusMonitor />} />
                         <Route path="/status-monitor" element={<StatusMonitor />} />
                         <Route path="/maps" element={<MapManagement />} />
+                        <Route path="/path-generator" element={<PathAutoGenerator />} />
                         <Route path="/control" element={<DeviceControl />} />
                         <Route path="/supply" element={<SupplyManagement />} />
                         <Route path="/settings" element={<SystemSettings />} />
