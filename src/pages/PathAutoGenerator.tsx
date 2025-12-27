@@ -149,6 +149,21 @@ const PathAutoGenerator: React.FC = () => {
       setGeneratedPath(result);
       setPreviewPath(result.points);
       message.success('路径生成成功');
+      
+      // 自动保存路径
+      const pathName = form.getFieldValue('pathName') || `path_${Date.now()}`;
+      try {
+        await apiService.post('/path/save', {
+          name: pathName,
+          mapId: selectedMapId,
+          points: result.points,
+          metadata: result.metadata,
+        });
+        message.success('路径已自动保存并生成nav2_routes.yaml文件');
+      } catch (error) {
+        console.error('Failed to auto-save path:', error);
+        message.warning('路径生成成功但自动保存失败');
+      }
     } catch (error: any) {
       console.error('Failed to generate path:', error);
       message.error(error.response?.data?.message || '路径生成失败');
@@ -398,7 +413,7 @@ const PathAutoGenerator: React.FC = () => {
             </div>
           )}
 
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space vertical style={{ width: '100%' }}>
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}
@@ -437,12 +452,12 @@ const PathAutoGenerator: React.FC = () => {
   const renderRectangleMode = () => (
     <Card title="矩形覆盖区域选择" size="small">
       <Alert
-        message="请在地图上依次点击选择4个角点（按顺时针或逆时针顺序）"
+        title="请在地图上依次点击选择4个角点（按顺时针或逆时针顺序）"
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
       />
-      <Space direction="vertical" style={{ width: '100%' }}>
+      <Space vertical style={{ width: '100%' }}>
         {selectedCorners.map((corner, index) => (
           <Tag key={index} color="blue">
             角点{index + 1}: ({corner.x.toFixed(2)}, {corner.y.toFixed(2)})
@@ -456,12 +471,12 @@ const PathAutoGenerator: React.FC = () => {
   const renderCorridorMode = () => (
     <Card title="走廊覆盖路径选择" size="small">
       <Alert
-        message="请在地图上依次点击选择起点和终点"
+        title="请在地图上依次点击选择起点和终点"
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
       />
-      <Space direction="vertical" style={{ width: '100%' }}>
+      <Space vertical style={{ width: '100%' }}>
         {selectedStartPoint && (
           <Tag color="green">
             起点: ({selectedStartPoint.x.toFixed(2)}, {selectedStartPoint.y.toFixed(2)})
@@ -504,7 +519,7 @@ const PathAutoGenerator: React.FC = () => {
             />
             {previewPath.length > 0 && (
               <Alert
-                message={`已生成路径预览，共 ${previewPath.length} 个路径点`}
+                title={`已生成路径预览，共 ${previewPath.length} 个路径点`}
                 type="success"
                 showIcon
                 style={{ marginTop: 16 }}
@@ -535,95 +550,115 @@ const PathAutoGenerator: React.FC = () => {
 
               <Divider>路径参数</Divider>
 
-              <Collapse size="small" defaultActiveKey={['basic']}>
-                <Collapse.Panel header="基本参数" key="basic">
-                  <Form.Item label="采样距离 (m)">
-                    <Slider
-                      min={0.1}
-                      max={1.0}
-                      step={0.05}
-                      value={pathParams.sampleDistance}
-                      onChange={(value) => setPathParams({ ...pathParams, sampleDistance: value })}
-                      marks={{ 0.1: '0.1', 0.5: '0.5', 1.0: '1.0' }}
-                    />
-                  </Form.Item>
+              <Collapse 
+                size="small" 
+                defaultActiveKey={['basic']}
+                items={[
+                  {
+                    key: 'basic',
+                    label: '基本参数',
+                    children: (
+                      <>
+                        <Form.Item label="采样距离 (m)">
+                          <Slider
+                            min={0.1}
+                            max={1.0}
+                            step={0.05}
+                            value={pathParams.sampleDistance}
+                            onChange={(value) => setPathParams({ ...pathParams, sampleDistance: value })}
+                            marks={{ 0.1: '0.1', 0.5: '0.5', 1.0: '1.0' }}
+                          />
+                        </Form.Item>
 
-                  <Form.Item label="线间距 (m)">
-                    <Slider
-                      min={0.2}
-                      max={2.0}
-                      step={0.1}
-                      value={pathParams.lineSpacing}
-                      onChange={(value) => setPathParams({ ...pathParams, lineSpacing: value })}
-                      marks={{ 0.2: '0.2', 1.0: '1.0', 2.0: '2.0' }}
-                    />
-                  </Form.Item>
+                        <Form.Item label="线间距 (m)">
+                          <Slider
+                            min={0.2}
+                            max={2.0}
+                            step={0.1}
+                            value={pathParams.lineSpacing}
+                            onChange={(value) => setPathParams({ ...pathParams, lineSpacing: value })}
+                            marks={{ 0.2: '0.2', 1.0: '1.0', 2.0: '2.0' }}
+                          />
+                        </Form.Item>
 
-                  <Form.Item label="重叠比例">
-                    <Slider
-                      min={0}
-                      max={0.3}
-                      step={0.05}
-                      value={pathParams.overlapRatio}
-                      onChange={(value) => setPathParams({ ...pathParams, overlapRatio: value })}
-                      marks={{ 0: '0%', 0.1: '10%', 0.2: '20%', 0.3: '30%' }}
-                    />
-                  </Form.Item>
-                </Collapse.Panel>
+                        <Form.Item label="重叠比例">
+                          <Slider
+                            min={0}
+                            max={0.3}
+                            step={0.05}
+                            value={pathParams.overlapRatio}
+                            onChange={(value) => setPathParams({ ...pathParams, overlapRatio: value })}
+                            marks={{ 0: '0%', 0.1: '10%', 0.2: '20%', 0.3: '30%' }}
+                          />
+                        </Form.Item>
+                      </>
+                    )
+                  },
+                  {
+                    key: 'turn',
+                    label: '转弯参数',
+                    children: (
+                      <>
+                        <Form.Item label="最小转弯半径 (m)">
+                          <InputNumber
+                            min={0.3}
+                            max={1.0}
+                            step={0.1}
+                            value={pathParams.minTurnRadius}
+                            onChange={(value) => setPathParams({ ...pathParams, minTurnRadius: value || 0.5 })}
+                            style={{ width: '100%' }}
+                          />
+                        </Form.Item>
 
-                <Collapse.Panel header="转弯参数" key="turn">
-                  <Form.Item label="最小转弯半径 (m)">
-                    <InputNumber
-                      min={0.3}
-                      max={1.0}
-                      step={0.1}
-                      value={pathParams.minTurnRadius}
-                      onChange={(value) => setPathParams({ ...pathParams, minTurnRadius: value || 0.5 })}
-                      style={{ width: '100%' }}
-                    />
-                  </Form.Item>
+                        <Form.Item label="最大转弯半径 (m)">
+                          <InputNumber
+                            min={1.0}
+                            max={5.0}
+                            step={0.5}
+                            value={pathParams.maxTurnRadius}
+                            onChange={(value) => setPathParams({ ...pathParams, maxTurnRadius: value || 2.0 })}
+                            style={{ width: '100%' }}
+                          />
+                        </Form.Item>
 
-                  <Form.Item label="最大转弯半径 (m)">
-                    <InputNumber
-                      min={1.0}
-                      max={5.0}
-                      step={0.5}
-                      value={pathParams.maxTurnRadius}
-                      onChange={(value) => setPathParams({ ...pathParams, maxTurnRadius: value || 2.0 })}
-                      style={{ width: '100%' }}
-                    />
-                  </Form.Item>
-
-                  <Form.Item label="转弯方法">
-                    <Select
-                      value={pathParams.turnMethod}
-                      onChange={(value) => setPathParams({ ...pathParams, turnMethod: value })}
-                      style={{ width: '100%' }}
-                    >
-                      <Select.Option value="bezier">贝塞尔曲线</Select.Option>
-                      <Select.Option value="arc">圆弧</Select.Option>
-                      <Select.Option value="spline">样条曲线</Select.Option>
-                    </Select>
-                  </Form.Item>
-                </Collapse.Panel>
-
-                <Collapse.Panel header="高级参数" key="advanced">
-                  <Form.Item label="中心线生成方法">
-                    <Select
-                      value={pathParams.centerlineMethod}
-                      onChange={(value) => setPathParams({ ...pathParams, centerlineMethod: value })}
-                      style={{ width: '100%' }}
-                    >
-                      <Select.Option value="distance_field">距离场法</Select.Option>
-                      <Select.Option value="skeleton">骨架法</Select.Option>
-                    </Select>
-                  </Form.Item>
-                </Collapse.Panel>
-              </Collapse>
+                        <Form.Item label="转弯方法">
+                          <Select
+                            value={pathParams.turnMethod}
+                            onChange={(value) => setPathParams({ ...pathParams, turnMethod: value })}
+                            style={{ width: '100%' }}
+                          >
+                            <Select.Option value="bezier">贝塞尔曲线</Select.Option>
+                            <Select.Option value="arc">圆弧</Select.Option>
+                            <Select.Option value="spline">样条曲线</Select.Option>
+                          </Select>
+                        </Form.Item>
+                      </>
+                    )
+                  },
+                  {
+                    key: 'advanced',
+                    label: '高级参数',
+                    children: (
+                      <>
+                        <Form.Item label="中心线生成方法">
+                          <Select
+                            value={pathParams.centerlineMethod}
+                            onChange={(value) => setPathParams({ ...pathParams, centerlineMethod: value })}
+                            style={{ width: '100%' }}
+                          >
+                            <Select.Option value="distance_field">距离场法</Select.Option>
+                            <Select.Option value="skeleton">骨架法</Select.Option>
+                          </Select>
+                        </Form.Item>
+                      </>
+                    )
+                  }
+                ]}
+              />
 
               <Divider />
 
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space vertical style={{ width: '100%' }}>
                 <Button
                   type="primary"
                   icon={<PlayCircleOutlined />}

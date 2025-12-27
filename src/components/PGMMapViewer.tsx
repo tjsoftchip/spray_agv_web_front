@@ -111,45 +111,36 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // 清空画布
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // 加载并绘制PGM图像
     const img = new Image();
+    
     img.onload = () => {
-      // 计算缩放和偏移
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
       const canvasWidth = canvas.width;
       const canvasHeight = canvas.height;
       
-      // 设置缩放以适应画布
       const scaleX = canvasWidth / (currentMap.width * currentMap.resolution);
       const scaleY = canvasHeight / (currentMap.height * currentMap.resolution);
       const autoScale = Math.min(scaleX, scaleY) * 0.8;
       
       const finalScale = scale * autoScale;
       
-      // 计算图像位置
       const imgWidth = currentMap.width * currentMap.resolution * finalScale;
       const imgHeight = currentMap.height * currentMap.resolution * finalScale;
       const imgX = (canvasWidth - imgWidth) / 2 + offset.x;
       const imgY = (canvasHeight - imgHeight) / 2 + offset.y;
 
-      // 绘制地图图像
       ctx.drawImage(img, imgX, imgY, imgWidth, imgHeight);
 
-      // 绘制导航点连线
       drawRoadSegments(ctx, finalScale, imgX, imgY);
       
-      // 绘制导航点
       drawNavigationPoints(ctx, finalScale, imgX, imgY);
       
-      // 绘制机器人位置
       if (robotPosition || localRobotPosition) {
         drawRobotPosition(ctx, finalScale, imgX, imgY);
       }
     };
 
-    // 加载PGM图像
     img.src = `/api/maps/${currentMap.name}/image`;
   };
 

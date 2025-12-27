@@ -6,14 +6,14 @@ const StatusMonitorTest: React.FC = () => {
   return (
     <div style={{ padding: '16px' }}>
       <Alert
-        message="状态监控页面测试"
+        title="状态监控页面测试"
         description="这是一个综合性的状态监控页面，合并了以下功能："
         type="info"
         showIcon
         style={{ marginBottom: '16px' }}
       />
       
-      <Space direction="vertical" size="small" style={{ width: '100%', marginBottom: '16px' }}>
+      <Space vertical size="small" style={{ width: '100%', marginBottom: '16px' }}>
         <Card size="small" title="功能说明">
           <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '14px' }}>
             <li>✅ 实时状态监控（电池、水位、速度、任务状态）</li>

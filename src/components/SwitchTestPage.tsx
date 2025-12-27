@@ -9,7 +9,7 @@ const SwitchTestPage: React.FC = () => {
   return (
     <div style={{ padding: '20px' }}>
       <Card title="Switch组件样式测试" style={{ maxWidth: '800px', margin: '0 auto' }}>
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+        <Space vertical size="large" style={{ width: '100%' }}>
           
           <div>
             <h3>基本开关测试</h3>
@@ -28,7 +28,7 @@ const SwitchTestPage: React.FC = () => {
 
           <div>
             <h3>设备控制开关</h3>
-            <Space direction="vertical">
+            <Space vertical>
               <Space>
                 <Switch 
                   checked={switch2} 
@@ -54,7 +54,7 @@ const SwitchTestPage: React.FC = () => {
 
           <div>
             <h3>不同状态的开关</h3>
-            <Space direction="vertical">
+            <Space vertical>
               <Space>
                 <Switch defaultChecked checkedChildren="正常开启" unCheckedChildren="正常关闭" />
                 <span>正常状态</span>

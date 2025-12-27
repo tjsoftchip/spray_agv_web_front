@@ -563,7 +563,7 @@ const TaskManagement: React.FC = () => {
             {({ getFieldValue }) => {
               return getFieldValue('operationType') === 'scheduled' ? (
                 <Form.Item label="定时策略">
-                  <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space vertical style={{ width: '100%' }}>
                     <Form.Item
                       name={['scheduleConfig', 'type']}
                       label="执行周期"
@@ -618,7 +618,7 @@ const TaskManagement: React.FC = () => {
           </Form.Item>
 
           <Form.Item label="初始位置设置">
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space vertical style={{ width: '100%' }}>
               <Form.Item
                 name={['initialPosition', 'x']}
                 label="X坐标 (米)"

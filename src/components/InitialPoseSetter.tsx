@@ -144,7 +144,7 @@ const InitialPoseSetter: React.FC<InitialPoseProps> = ({ onPoseSet }) => {
 
       {poseStatus && !poseStatus.initialized && (
         <Alert
-          message="机器人未初始化"
+          title="机器人未初始化"
           description={poseStatus.message}
           type="warning"
           showIcon

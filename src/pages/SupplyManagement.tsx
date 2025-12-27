@@ -486,7 +486,7 @@ const SupplyManagement: React.FC = () => {
             <Row gutter={[24, 16]}>
               <Col xs={24} lg={8}>
                 <Card size="small" title="🚀 主要操作" style={{ background: '#fafafa' }}>
-                  <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space vertical style={{ width: '100%' }}>
                     {supplyStatus.autoSupplyEnabled ? (
                       <Button
                         type="primary"
@@ -539,7 +539,7 @@ const SupplyManagement: React.FC = () => {
               </Col>
               <Col xs={24} lg={8}>
                 <Card size="small" title="⚙️ 补给模式" style={{ background: '#fafafa' }}>
-                  <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space vertical style={{ width: '100%' }}>
                     <div style={{ textAlign: 'center', marginBottom: '12px' }}>
                       <Switch
                         checkedChildren="全自动"
@@ -740,7 +740,7 @@ const SupplyManagement: React.FC = () => {
               boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
             }}
           >
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space vertical style={{ width: '100%' }}>
               <Row gutter={[8, 8]}>
                 <Col xs={12}>
                   <Button block onClick={handleCreateTask}>创建任务</Button>
@@ -833,7 +833,7 @@ const SupplyManagement: React.FC = () => {
 
           <Form.Item label="📍 位置设置">
             <div style={{ background: '#f5f5f5', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space vertical style={{ width: '100%' }}>
                 <div>
                   <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 'bold' }}>🗺️ 选择预设点位</div>
                   <Select
