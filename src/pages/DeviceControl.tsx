@@ -18,7 +18,9 @@ const DeviceControl: React.FC = () => {
   const velocityIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [maxSpeed, setMaxSpeed] = useState(1.0); // 默认最大速度1.0m/s
   const [isJoystickActive, setIsJoystickActive] = useState(true); // 手柄激活状态
+  const [isFullControlMode, setIsFullControlMode] = useState(false); // 完全接管模式状态
 
+  const [emergencyStopActive, setEmergencyStopActive] = useState(false); // 紧急停止状态
   useEffect(() => {
     socketService.connect();
 
@@ -47,10 +49,10 @@ const DeviceControl: React.FC = () => {
   useEffect(() => {
     socketService.connect();
     
-    // 声明 /web_cmd_vel 话题，确保可以发布
+    // 声明 /manual/cmd_vel 话题，确保可以发布
     socketService.sendRosCommand({
       op: 'advertise',
-      topic: '/web_cmd_vel',
+      topic: '/manual/cmd_vel',
       type: 'geometry_msgs/msg/Twist'
     });
     
@@ -60,7 +62,7 @@ const DeviceControl: React.FC = () => {
       // 取消话题声明
       socketService.sendRosCommand({
         op: 'unadvertise',
-        topic: '/web_cmd_vel'
+        topic: '/manual/cmd_vel'
       });
       
       socketService.disconnect();
@@ -127,9 +129,20 @@ const DeviceControl: React.FC = () => {
       linear: { x: 0.0, y: 0.0, z: 0.0 },
       angular: { x: 0.0, y: 0.0, z: 0.0 }
     };
-    publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
+    publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
+    // 设置紧急停止状态
+    setEmergencyStopActive(true);
+    publishRosCommand('/emergency/stop', 'std_msgs/Bool', { data: true });
     
-    message.warning('紧急停止已触发');
+    message.warning('紧急停止已触发 - 所有控制已失效');
+    
+  };
+
+  // 复位紧急停止
+  const resetEmergencyStop = () => {
+    setEmergencyStopActive(false);
+    publishRosCommand('/emergency/stop', 'std_msgs/Bool', { data: false });
+    message.success('紧急停止已复位 - 控制权已恢复');
   };
 
   const handleModeSwitch = (mode: 'auto' | 'manual') => {
@@ -157,12 +170,12 @@ const DeviceControl: React.FC = () => {
     };
     console.log('Sending twist message:', twistMessage);
     // 使用专门的web_cmd_vel话题，避免与手柄控制冲突
-    publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
+    publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
     
     // 定时发送速度指令，确保持续控制
     velocityIntervalRef.current = setInterval(() => {
       console.log('Continuously sending twist message:', twistMessage);
-      publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
+      publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
     }, 100); // 每100ms发送一次
   };
 
@@ -182,7 +195,7 @@ const DeviceControl: React.FC = () => {
       angular: { x: 0.0, y: 0.0, z: 0.0 }
     };
     console.log('Sending stop message:', stopMessage);
-    publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
+    publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
   };
 
   const handleJoystickMove = (event: any) => {
@@ -226,15 +239,15 @@ const DeviceControl: React.FC = () => {
     };
     
     // 立即发送一次停止命令
-    publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
+    publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
     
     // 延迟再发送两次，确保停止命令可靠到达
     setTimeout(() => {
-      publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
+      publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
     }, 50);
     
     setTimeout(() => {
-      publishRosCommand('/web_cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
+      publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
     }, 100);
   };
 
@@ -247,6 +260,23 @@ const DeviceControl: React.FC = () => {
       handleEmergencyStop();
     } else {
       message.success('手柄控制已启用');
+    }
+  };
+
+
+  // 切换完全接管模式
+  const toggleFullControlMode = () => {
+    const newMode = !isFullControlMode;
+    setIsFullControlMode(newMode);
+    
+    // 发布完全接管模式状态到 ROS2（控制遥控器和网页摇杆）
+    publishRosCommand('/joystick/full_control_state', 'std_msgs/Bool', { data: newMode });
+    publishRosCommand('/manual/full_control_state', 'std_msgs/Bool', { data: newMode });
+    
+    if (newMode) {
+      message.success('完全接管模式已启用 - 网页摇杆获得最高控制权（仅次于遥控器）');
+    } else {
+      message.info('完全接管模式已禁用 - 恢复默认优先级管理');
     }
   };
 
@@ -322,27 +352,27 @@ const DeviceControl: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                
-                {/* 手柄激活切换按键 */}
+
+                {/* 完全接管模式切换按键 */}
                 <div style={{ 
                   marginTop: 20,
                   textAlign: 'center',
-                  background: isJoystickActive ? '#d4edda' : '#f8d7da',
+                  background: isFullControlMode ? '#fff3cd' : '#d4edda',
                   padding: '16px 24px',
                   borderRadius: 8,
-                  border: `2px solid ${isJoystickActive ? '#c3e6cb' : '#f5c6cb'}`,
+                  border: `2px solid ${isFullControlMode ? '#ffeeba' : '#c3e6cb'}`,
                   width: '100%'
                 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: isJoystickActive ? '#155724' : '#721c24' }}>
-                    🎮 手柄控制状态
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: isFullControlMode ? '#856404' : '#155724' }}>
+                    🎮 完全接管模式
                   </div>
                   <Button
-                    type={isJoystickActive ? 'primary' : 'default'}
+                    type="default"
                     size="large"
-                    onClick={toggleJoystickActive}
+                    onClick={toggleFullControlMode}
                     style={{
-                      backgroundColor: isJoystickActive ? '#28a745' : '#6c757d',
-                      borderColor: isJoystickActive ? '#28a745' : '#6c757d',
+                      backgroundColor: isFullControlMode ? '#ffc107' : '#28a745',
+                      borderColor: isFullControlMode ? '#ffc107' : '#28a745',
                       color: 'white',
                       fontWeight: 600,
                       minWidth: 120,
@@ -351,20 +381,67 @@ const DeviceControl: React.FC = () => {
                       boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
                     }}
                   >
-                    {isJoystickActive ? '🟢 启用中' : '🔴 已禁用'}
+                    {isFullControlMode ? '⚡ 已启用' : '🟢 已禁用'}
                   </Button>
                   <div style={{ 
                     fontSize: 12, 
                     marginTop: 8,
-                    color: isJoystickActive ? '#155724' : '#721c24'
+                    color: isFullControlMode ? '#856404' : '#155724',
+                    lineHeight: 1.4
                   }}>
-                    {isJoystickActive ? '手柄控制正常工作' : '手柄控制已禁用，按键无响应'}
+                    {isFullControlMode 
+                      ? '网页摇杆获得最高控制权，即使速度为0也保持控制' 
+                      : '默认优先级管理，按照优先级规则切换控制源'}
                   </div>
                 </div>
+
               </div>
             </Col>
             <Col xs={24} md={12}>
               <div style={{ padding: '24px' }}>
+
+                {/* 紧急停止复位按钮 */}
+                {emergencyStopActive && (
+                  <div style={{ 
+                    marginTop: 20,
+                    textAlign: 'center',
+                    background: '#f8d7da',
+                    padding: '16px 24px',
+                    borderRadius: 8,
+                    border: '2px solid #f5c6cb',
+                    width: '100%'
+                  }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: '#721c24' }}>
+                      🛑 紧急停止已触发
+                    </div>
+                    <Button
+                      type="default"
+                      size="large"
+                      onClick={resetEmergencyStop}
+                      style={{
+                        backgroundColor: '#dc3545',
+                        borderColor: '#dc3545',
+                        color: 'white',
+                        fontWeight: 600,
+                        minWidth: 120,
+                        height: 40,
+                        borderRadius: 6,
+                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                      }}
+                    >
+                      🔓 复位控制权
+                    </Button>
+                    <div style={{ 
+                      fontSize: 12, 
+                      marginTop: 8,
+                      color: '#721c24',
+                      lineHeight: 1.4
+                    }}>
+                      点击复位按钮以恢复所有控制权
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ 
                   marginBottom: 24,
                   background: '#f8f9fa',
@@ -422,23 +499,6 @@ const DeviceControl: React.FC = () => {
                   />
                 </div>
                 
-                <Button 
-                  danger 
-                  size="large" 
-                  block 
-                  onClick={handleEmergencyStop}
-                  style={{ 
-                    height: 48,
-                    borderRadius: 8,
-                    fontWeight: 600,
-                    fontSize: 16,
-                    background: '#ff4d4f',
-                    border: 'none',
-                    boxShadow: '0 4px 15px rgba(255, 77, 79, 0.3)'
-                  }}
-                >
-                  🛑 紧急停止
-                </Button>
               </div>
             </Col>
           </Row>
