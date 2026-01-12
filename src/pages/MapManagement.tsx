@@ -503,7 +503,7 @@ const MapManagement: React.FC = () => {
   const handleLoadMap = async (id: string) => {
     try {
       console.log('Loading map for preview:', id);
-      message.loading({ content: '正在加载地图...', key: 'loadMap' });
+      message.loading({ content: '正在加载地图预览...', key: 'loadMap' });
       
       // 获取地图详细信息
       const response = await fetch(`/api/maps/scan-local`);
@@ -604,9 +604,8 @@ const MapManagement: React.FC = () => {
       
       img.src = URL.createObjectURL(imageBlob);
       
-      // 同时设置为激活地图
-      await mapApi.setActiveMapLocal(id);
-      loadMaps();
+      // 注意：加载按钮只用于预览，不设置激活地图
+      // 只有"设为默认"按钮才会调用 setActiveMapLocal
     } catch (error: any) {
       console.error('加载地图失败:', error);
       message.error({ content: '加载地图失败', key: 'loadMap' });
