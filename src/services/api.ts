@@ -55,17 +55,16 @@ class ApiService {
         }
         // 添加缓存破坏参数
         config.headers['X-Request-Time'] = Date.now().toString();
-        
-        // 详细的请求日志
-        console.log('[API Request]', {
-          method: config.method?.toUpperCase(),
-          url: config.url,
-          baseURL: config.baseURL,
-          fullURL: `${config.baseURL}${config.url}`,
-          hasToken: !!token,
-          headers: config.headers
-        });
-        
+
+        // 只在开发环境且启用调试时打印请求日志
+        if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_API === 'true') {
+          console.log('[API Request]', {
+            method: config.method?.toUpperCase(),
+            url: config.url,
+            fullURL: `${config.baseURL}${config.url}`,
+          });
+        }
+
         return config;
       },
       (error) => {
@@ -75,11 +74,13 @@ class ApiService {
 
     this.axiosInstance.interceptors.response.use(
       (response) => {
-        console.log('[API Response]', {
-          status: response.status,
-          url: response.config.url,
-          method: response.config.method?.toUpperCase()
-        });
+        // 只在开发环境且启用调试时打印响应日志
+        if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_API === 'true') {
+          console.log('[API Response]', {
+            status: response.status,
+            url: response.config.url,
+          });
+        }
         return response;
       },
       async (error) => {

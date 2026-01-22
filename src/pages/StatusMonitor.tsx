@@ -34,7 +34,6 @@ const StatusMonitor: React.FC = () => {
 
   // 地图加载完成回调
   const handleMapLoaded = (mapInfo: { origin: { x: number; y: number; z: number }; resolution: number; width: number; height: number }) => {
-    console.log('Map loaded:', mapInfo);
     // 地图加载完成，机器人位置将从 ROS2 实时数据中获取
   };
   const [speed, setSpeed] = useState(0);
@@ -60,10 +59,8 @@ const StatusMonitor: React.FC = () => {
   const subscribeToCamera = useCallback(() => {
     if (enableCameraPreviewRef.current) {
       const status = socketService.getConnectionStatus();
-      console.log('Subscribing to camera topic, socket status:', status);
-      
+
       if (status !== 'connected') {
-        console.warn('Socket not connected, attempting to connect...');
         socketService.connect();
         // 等待连接后再订阅
         setTimeout(() => {
@@ -144,16 +141,13 @@ const StatusMonitor: React.FC = () => {
       
       if (data.topic === '/camera/color/image_raw' && data.msg) {
         if (!enableCameraPreviewRef.current) {
-          console.log('Camera preview disabled, ignoring image');
           return;
         }
-        
+
         const now = Date.now();
         if (now - lastCameraUpdateRef.current < 500) {
           return;
         }
-        
-        console.log('Received camera image data, encoding:', data.msg.encoding);
         
         try {
           if (data.msg.data && data.msg.width && data.msg.height) {
@@ -246,15 +240,13 @@ const StatusMonitor: React.FC = () => {
   }, [subscribeToCamera]);
 
   useEffect(() => {
-    console.log('Camera preview state changed:', enableCameraPreview, 'useWebVideoServer:', useWebVideoServer);
     if (enableCameraPreview && !useWebVideoServer) {
       // 只有不使用 web_video_server 时才通过 WebSocket 订阅
       subscribeToCamera();
     } else if (!enableCameraPreview) {
-      console.log('Unsubscribing from camera topic...');
-      socketService.sendRosCommand({ 
-        op: 'unsubscribe', 
-        topic: '/camera/color/image_raw' 
+      socketService.sendRosCommand({
+        op: 'unsubscribe',
+        topic: '/camera/color/image_raw'
       });
       setCameraImage(null);
     }

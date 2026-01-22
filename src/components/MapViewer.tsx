@@ -198,27 +198,20 @@ const MapViewer: React.FC<MapViewerProps> = ({
   // 绘制地图
   useEffect(() => {
     if (!canvasRef.current || !mapData || !containerRef.current) {
-      console.log('Canvas render skipped:', {
-        hasCanvas: !!canvasRef.current,
-        hasMapData: !!mapData,
-        hasContainer: !!containerRef.current
-      });
       return;
     }
-    
+
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-      console.error('Failed to get 2D context');
       return;
     }
-    
+
     // 检查容器尺寸
     const containerWidth = containerRef.current.clientWidth;
     const containerHeight = containerRef.current.clientHeight;
-    
+
     if (containerWidth === 0 || containerHeight === 0) {
-      console.warn('Container has zero size, waiting...', { containerWidth, containerHeight });
       return;
     }
     
@@ -384,8 +377,6 @@ const MapViewer: React.FC<MapViewerProps> = ({
         ctx.fill();
         
         ctx.restore();
-      } else {
-        console.warn('Robot position out of map bounds:', { robotX, robotY, width, height });
       }
     }
   }, [mapData, navigationPoints, roadSegments, robotPosition, scale, offset, containerSize]);

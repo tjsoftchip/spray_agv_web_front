@@ -22,6 +22,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { logout } from '../store/slices/authSlice';
 import type { RootState } from '../store';
 import { socketService } from '../services/socket';
+import { apiService } from '../services/api';
 
 const { Header, Sider, Content } = Layout;
 
@@ -61,17 +62,10 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   // 监听紧急停止状态变化
   useEffect(() => {
     socketService.onRosMessage((data) => {
-      console.log('ROS message received:', data); // 调试日志
       if (data.topic === '/emergency_stop_status') {
         const isActive = data.msg.data;
-        console.log('Emergency stop status changed:', isActive); // 调试日志
         setEmergencyActive(isActive);
       }
-    });
-    
-    // 监听服务响应
-    socketService.on('service_response', (data) => {
-      console.log('Service response received:', data); // 调试日志
     });
   }, []);
 
@@ -141,34 +135,20 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   // 紧急停止
   const handleEmergencyStop = async () => {
     try {
-      // 使用相对URL和正确的API路径
-      const response = await fetch('/api/robot/emergency-stop', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({ action: 'stop' }),
-      });
+      const result = await apiService.post('/robot/emergency-stop', { action: 'stop' });
+      message.warning(result.message || '⚠️ 紧急停止已激活 - 所有运动和喷淋已停止');
+      setEmergencyActive(true);
 
-      if (response.ok) {
-        const result = await response.json();
-        message.warning(result.message || '⚠️ 紧急停止已激活 - 所有运动和喷淋已停止');
-        setEmergencyActive(true);
-        
-        // 同时发布ROS2消息作为备用
-        socketService.sendRosCommand({
-          op: 'call_service',
-          service: '/emergency_stop',
-          args: { data: true }
-        });
-      } else {
-        message.error('紧急停止请求失败');
-      }
+      // 同时发布ROS2消息作为备用
+      socketService.sendRosCommand({
+        op: 'call_service',
+        service: '/emergency_stop',
+        args: { data: true }
+      });
     } catch (error) {
       console.error('Emergency stop error:', error);
       message.error('紧急停止请求失败');
-      
+
       // API失败时尝试直接ROS2调用
       socketService.sendRosCommand({
         op: 'call_service',
@@ -181,33 +161,20 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   // 复位紧急停止
   const handleEmergencyReset = async () => {
     try {
-      const response = await fetch('/api/robot/emergency-stop', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({ action: 'reset' }),
-      });
+      const result = await apiService.post('/robot/emergency-stop', { action: 'reset' });
+      message.success(result.message || '✅ 紧急停止已复位 - 系统可正常操作');
+      setEmergencyActive(false);
 
-      if (response.ok) {
-        const result = await response.json();
-        message.success(result.message || '✅ 紧急停止已复位 - 系统可正常操作');
-        setEmergencyActive(false);
-        
-        // 同时发布ROS2消息作为备用
-        socketService.sendRosCommand({
-          op: 'call_service',
-          service: '/emergency_stop',
-          args: { data: false }
-        });
-      } else {
-        message.error('紧急停止复位请求失败');
-      }
+      // 同时发布ROS2消息作为备用
+      socketService.sendRosCommand({
+        op: 'call_service',
+        service: '/emergency_stop',
+        args: { data: false }
+      });
     } catch (error) {
       console.error('Emergency reset error:', error);
       message.error('紧急停止复位请求失败');
-      
+
       // API失败时尝试直接ROS2调用
       socketService.sendRosCommand({
         op: 'call_service',

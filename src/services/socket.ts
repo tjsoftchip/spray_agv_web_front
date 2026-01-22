@@ -33,14 +33,12 @@ class SocketService {
 
   public connect(): void {
     this.connectionRefCount++;
-    
+
     if (this.socket?.connected) {
-      console.log(`Socket already connected (ref count: ${this.connectionRefCount})`);
       return;
     }
 
     this.connectionStatus = 'connecting';
-    console.log(`Connecting to WebSocket server (ref count: ${this.connectionRefCount})...`);
 
     this.socket = io(WS_URL, {
       transports: ['websocket', 'polling'], // 添加polling作为备用传输方式
@@ -53,29 +51,22 @@ class SocketService {
     });
 
     this.socket.on('connect', () => {
-      console.log('Socket connected successfully');
       this.connectionStatus = 'connected';
       this.reconnectAttempts = 0;
-      
+
       // 连接成功后，尝试切换回websocket
       if (this.socket?.io.opts.transports.includes('polling')) {
-        console.log('Attempting to switch back to WebSocket...');
         this.socket.io.opts.transports = ['websocket', 'polling'];
       }
     });
 
     this.socket.on('disconnect', (reason) => {
-      console.log('Socket disconnected, reason:', reason);
       this.connectionStatus = 'disconnected';
-      
+
       // 根据断开原因决定是否自动重连
       if (reason === 'io server disconnect') {
         // 服务器主动断开，需要手动重连
-        console.log('Server disconnected, attempting to reconnect...');
         this.socket?.connect();
-      } else if (reason === 'ping timeout' || reason === 'transport close') {
-        // 网络问题，自动重连
-        console.log('Network issue, will auto-reconnect...');
       }
     });
 
@@ -83,13 +74,12 @@ class SocketService {
       console.error('Socket connection error:', error);
       this.connectionStatus = 'reconnecting';
       this.reconnectAttempts++;
-      
+
       // 如果是WebSocket连接失败，尝试使用polling
       if (this.socket && this.reconnectAttempts > 2) {
-        console.log('WebSocket failed, switching to polling transport...');
         this.socket.io.opts.transports = ['polling'];
       }
-      
+
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
         console.error('Max reconnection attempts reached');
         this.connectionStatus = 'disconnected';
@@ -97,13 +87,11 @@ class SocketService {
     });
 
     this.socket.on('reconnect', (attemptNumber) => {
-      console.log(`Socket reconnected after ${attemptNumber} attempts`);
       this.connectionStatus = 'connected';
       this.reconnectAttempts = 0;
     });
 
     this.socket.on('reconnect_attempt', (attemptNumber) => {
-      console.log(`Reconnection attempt ${attemptNumber}`);
       this.connectionStatus = 'reconnecting';
     });
 
@@ -121,12 +109,9 @@ class SocketService {
     if (this.connectionRefCount > 0) {
       this.connectionRefCount--;
     }
-    
-    console.log(`Disconnect called (ref count: ${this.connectionRefCount})`);
-    
+
     // 只有当引用计数为0时才真正断开连接
     if (this.connectionRefCount === 0 && this.socket) {
-      console.log('Actually disconnecting socket...');
       this.stopHeartbeat();
       this.socket.disconnect();
       this.socket = null;

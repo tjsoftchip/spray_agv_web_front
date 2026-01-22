@@ -23,10 +23,6 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     socketService.connect();
-    
-    socketService.onRosMessage((data) => {
-      console.log('ROS message:', data);
-    });
 
     return () => {
       // 安全地清理 ECharts 实例

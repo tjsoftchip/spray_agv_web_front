@@ -34,7 +34,6 @@ const MapManagement: React.FC = () => {
   useEffect(() => {
     // 立即加载地图列表和检查建图状态
     const initializeComponent = async () => {
-      console.log('Initializing MapManagement component...');
       await loadMaps();
       await checkMappingStatus();
     };
@@ -58,10 +57,8 @@ const MapManagement: React.FC = () => {
 // 监听ROS消息
     socketService.on('ros_message', (data: any) => {
       if (data.topic === '/map') {
-        console.log('Received map data:', data.msg);
         setMapData(data.msg);
       } else if (data.topic === '/robot_pose') {
-        console.log('Received robot pose:', data.msg);
         setRobotPose({
           header: { frame_id: 'map' },
           pose: {
@@ -70,7 +67,6 @@ const MapManagement: React.FC = () => {
           }
         });
       } else if (data.topic === '/robot_pose_k') {
-        console.log('Received robot pose_k:', data.msg);
         setRobotPose({
           header: { frame_id: 'map' },
           pose: {
@@ -79,12 +75,10 @@ const MapManagement: React.FC = () => {
           }
         });
       } else if (data.topic === '/amcl_pose') {
-        console.log('Received AMCL pose:', data.msg);
         setRobotPose(data.msg);
       } else if (data.topic === '/odom') {
         // 里程计数据作为备选
         if (data.msg && data.msg.pose && data.msg.pose.pose) {
-          console.log('Using odom data as robot pose:', data.msg);
           const odomPose = {
             header: data.msg.header,
             pose: data.msg.pose.pose
@@ -94,11 +88,10 @@ const MapManagement: React.FC = () => {
       } else if (data.topic === '/tf') {
         // 从TF消息中提取map->base_link变换
         if (data.msg && data.msg.transforms) {
-          const mapToBase = data.msg.transforms.find((t: any) => 
+          const mapToBase = data.msg.transforms.find((t: any) =>
             t.header.frame_id === 'map' && t.child_frame_id === 'base_link'
           );
           if (mapToBase) {
-            console.log('Found map->base_link transform:', mapToBase);
             setRobotPose({
               header: { frame_id: 'map' },
               pose: {
@@ -138,81 +131,64 @@ const MapManagement: React.FC = () => {
   // 绘制地图
   useEffect(() => {
     if (!canvasRef.current || !mapData) {
-      console.log('No canvas or map data', { canvas: !!canvasRef.current, mapData: !!mapData });
       return;
     }
-    
-    console.log('Starting to draw map...');
-    
+
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
-    // 设置canvas样式以便调试
-    canvas.style.border = '2px solid red';
-    canvas.style.backgroundColor = '#f0f0f0';
-    
+
     // 安全检查：确保mapData.info和data存在
     if (!mapData.info || !mapData.data) {
-      console.warn('Map data structure is incomplete:', mapData);
       return;
     }
-    
+
     const { width, height } = mapData.info;
     let gridData = mapData.data;
     const resolution = mapData.info.resolution;
-    
+
     // 确保gridData是数组且有正确的长度
     if (!Array.isArray(gridData) || gridData.length === 0) {
-      console.warn('Invalid grid data:', gridData);
       return;
     }
-    
+
     // 缓存地图尺寸和原点，避免抖动
     // 使用四舍五入避免微小变化导致的频繁更新
     const originX = Math.round(mapData.info.origin.position.x * 100) / 100;
     const originY = Math.round(mapData.info.origin.position.y * 100) / 100;
     const mapKey = `${width}x${height}_${originX}_${originY}`;
-    
+
     if (canvas.dataset.mapKey !== mapKey) {
       // 设置画布尺寸
       canvas.width = width;
       canvas.height = height;
       canvas.dataset.mapKey = mapKey;
-      console.log('Canvas size updated to:', { width, height, origin: { x: originX, y: originY } });
     }
-    
+
     // 设置缩放
     const finalScale = scale * resolution;
-    
-    // 添加调试信息
-    console.log('Canvas setup:');
-    console.log('  Canvas width:', canvas.width);
-    console.log('  Canvas height:', canvas.height);
-    console.log('  Canvas style width:', canvas.style.width);
-    console.log('  Canvas style height:', canvas.style.height);
-    console.log('  Final scale:', finalScale);    
+
     // 计算容器尺寸
     const containerWidth = canvas.parentElement?.clientWidth || 800;
     const containerHeight = canvas.parentElement?.clientHeight || 600;
     const mapHeightMeters = height * resolution;
-    
+
     // 计算缩放比例，使地图占满画布高度
     const calculatedScale = containerHeight / mapHeightMeters;
     setScaleToFillHeight(calculatedScale);
-    
+
     // 应用用户缩放，但确保地图始终可见
     const adjustedScale = calculatedScale * scale;
-    
+
     // 最终显示尺寸（像素）
     const displayWidth = width * resolution * adjustedScale;
     const displayHeight = containerHeight;
-    
+
     // 设置canvas显示尺寸和居中
     const newLeft = `${(containerWidth - displayWidth) / 2}px`;
     const newTop = `0px`;
-    
-    if (canvas.style.width !== `${displayWidth}px` || 
+
+    if (canvas.style.width !== `${displayWidth}px` ||
         canvas.style.height !== `${displayHeight}px` ||
         canvas.style.left !== newLeft ||
         canvas.style.top !== newTop) {
@@ -221,21 +197,13 @@ const MapManagement: React.FC = () => {
       canvas.style.left = newLeft;
       canvas.style.top = newTop;
     }
-    
+
     // 清空画布
     ctx.clearRect(0, 0, width, height);
-    
+
     // 绘制背景
     ctx.fillStyle = '#f0f0f0';
     ctx.fillRect(0, 0, width, height);
-    
-    // 绘制地图网格
-    console.log('Drawing map with data length:', gridData.length);
-    console.log('Expected data length:', width * height);
-    console.log('Map resolution:', resolution);
-    console.log('Map dimensions:', width, 'x', height);
-    console.log('Map origin:', mapData.info.origin.position.x, mapData.info.origin.position.y);
-    console.log('Grid data sample:', gridData.slice(0, 20));
     
     // 创建图像数据（默认方向，不旋转）
     const mapImageData = ctx.createImageData(width, height);
@@ -279,33 +247,33 @@ const MapManagement: React.FC = () => {
     // 绘制机器人
     if (robotPose && robotPose.pose) {
       const { position, orientation } = robotPose.pose;
-      
+
       // 将机器人坐标从米转换为像素坐标
       const robotX = (position.x - mapData.info.origin.position.x) / resolution;
       const robotY = (position.y - mapData.info.origin.position.y) / resolution;
-      
+
       // 应用地图的上下镜像（因为地图已经翻转了）
       const canvasRobotY = height - 1 - robotY;
-      
+
       // 计算机器人朝向（从四元数转换为欧拉角）
       const { x: qx, y: qy, z: qz, w: qw } = orientation;
       const robotYaw = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz));
-      
+
       // 机器人显示尺寸（相对于地图尺寸），缩小为一半
       const robotDisplaySize = Math.max(5, Math.min(10, width * 0.01));
-      
+
       // 保存画布状态
       ctx.save();
-      
+
       // 移动到机器人位置
       ctx.translate(robotX, canvasRobotY);
-      
+
       // 绘制机器人主体（圆形）
       ctx.fillStyle = '#ff4d4f';
       ctx.beginPath();
       ctx.arc(0, 0, robotDisplaySize / 2, 0, 2 * Math.PI);
       ctx.fill();
-      
+
       // 绘制方向指示器（箭头）
       ctx.strokeStyle = '#ff4d4f';
       ctx.lineWidth = 2;
@@ -316,13 +284,13 @@ const MapManagement: React.FC = () => {
         robotDisplaySize * Math.sin(robotYaw)
       );
       ctx.stroke();
-      
+
       // 绘制方向箭头头部
       const arrowSize = robotDisplaySize * 0.3;
       const arrowAngle = Math.PI / 6;
       const endX = robotDisplaySize * Math.cos(robotYaw);
       const endY = robotDisplaySize * Math.sin(robotYaw);
-      
+
       ctx.beginPath();
       ctx.moveTo(endX, endY);
       ctx.lineTo(
@@ -335,22 +303,9 @@ const MapManagement: React.FC = () => {
         endY - arrowSize * Math.sin(robotYaw + arrowAngle)
       );
       ctx.stroke();
-      
+
       // 恢复画布状态
       ctx.restore();
-      
-      // 输出调试信息
-      const yawDegrees = (robotYaw * 180 / Math.PI).toFixed(2);
-      console.log('Robot drawn at:', {
-        x: robotX.toFixed(2),
-        y: canvasRobotY.toFixed(2),
-        yaw: yawDegrees + '°',
-        quaternion: { qx, qy, qz, qw },
-        arrowEnd: {
-          x: (robotDisplaySize * Math.cos(robotYaw)).toFixed(2),
-          y: (robotDisplaySize * Math.sin(robotYaw)).toFixed(2)
-        }
-      });
     }
   }, [mapData, robotPose, scale, scaleToFillHeight]);
 
@@ -358,16 +313,13 @@ const MapManagement: React.FC = () => {
     try {
       // 使用mapApi获取状态
       const response = await mapApi.getMappingStatusLocal();
-      console.log('Mapping status response:', response);
-      
+
       // 明确判断建图状态，严格检查 isMapping 字段
       if (response && typeof response.isMapping === 'boolean') {
         const newStatus = response.isMapping ? 'mapping' : 'idle';
-        console.log('Setting mapping status to:', newStatus);
         setMappingStatus(newStatus);
       } else {
         // 如果响应格式不正确，默认设置为 idle
-        console.warn('Invalid mapping status response, defaulting to idle:', response);
         setMappingStatus('idle');
       }
     } catch (error) {
@@ -426,20 +378,18 @@ const MapManagement: React.FC = () => {
     try {
       // 先调用保存地图API
       message.loading('正在保存地图，请稍候...', 0);
-      console.log('开始保存地图:', mapName);
-      
+
       await mapApi.saveMapLocal({ mapName });
-      
+
       // 等待一段时间确保地图保存完成
       await new Promise(resolve => setTimeout(resolve, 5000));
-      
+
       message.destroy(); // 关闭loading
       message.success('地图保存成功');
-      
+
       // 然后停止建图节点
-      console.log('开始停止建图节点...');
       await mapApi.stopMappingLocal();
-      
+
       setMappingStatus('idle');
       message.success('建图已停止并保存成功');
       setSaveModalVisible(false);
@@ -502,55 +452,52 @@ const MapManagement: React.FC = () => {
 
   const handleLoadMap = async (id: string) => {
     try {
-      console.log('Loading map for preview:', id);
       message.loading({ content: '正在加载地图预览...', key: 'loadMap' });
-      
+
       // 获取地图详细信息
       const response = await fetch(`/api/maps/scan-local`);
       const maps = await response.json();
       const selectedMap = maps.find((m: any) => m.id === id);
-      
+
       if (!selectedMap) {
         message.error({ content: '地图不存在', key: 'loadMap' });
         return;
       }
-      
-      console.log('Selected map info:', selectedMap);
-      
+
       // 从后端获取 PNG 图像数据
       const imageResponse = await fetch(`/api/maps/${id}/image`);
       if (!imageResponse.ok) {
         throw new Error('Failed to fetch map image');
       }
-      
+
       const imageBlob = await imageResponse.blob();
-      
+
       // 将 PNG 图像转换为地图数据
       const img = new Image();
-      
+
       img.onload = () => {
         try {
           const canvas = document.createElement('canvas');
           canvas.width = selectedMap.width;
           canvas.height = selectedMap.height;
           const ctx = canvas.getContext('2d');
-          
+
           if (!ctx) {
             throw new Error('Failed to get canvas context');
           }
-          
+
           // 绘制图像
           ctx.drawImage(img, 0, 0);
-          
+
           // 获取像素数据
           const imageData = ctx.getImageData(0, 0, selectedMap.width, selectedMap.height);
           const pixels = imageData.data;
-          
+
           // 转换为地图数据格式（0-100）
           const mapDataArray = [];
           for (let i = 0; i < pixels.length; i += 4) {
             const gray = pixels[i]; // R 通道（PNG 是灰度图）
-            
+
             // 转换：白色(255) -> 0 (空闲), 黑色(0) -> 100 (占用), 灰色 -> -1 (未知)
             let value = -1;
             if (gray > 250) {
@@ -560,10 +507,10 @@ const MapManagement: React.FC = () => {
             } else if (gray > 200 && gray <= 250) {
               value = 0; // 接近白色，视为空闲
             }
-            
+
             mapDataArray.push(value);
           }
-          
+
           // 设置地图数据
           const mapData = {
             info: {
@@ -576,18 +523,10 @@ const MapManagement: React.FC = () => {
             },
             data: mapDataArray
           };
-          
-          console.log('Map data constructed:', {
-            width: mapData.info.width,
-            height: mapData.info.height,
-            resolution: mapData.info.resolution,
-            dataLength: mapData.data.length,
-            origin: mapData.info.origin.position
-          });
-          
+
           setMapData(mapData);
           message.success({ content: '地图预览加载成功', key: 'loadMap' });
-          
+
           // 释放 blob URL
           URL.revokeObjectURL(img.src);
         } catch (error) {
@@ -595,15 +534,15 @@ const MapManagement: React.FC = () => {
           message.error({ content: '地图图像处理失败', key: 'loadMap' });
         }
       };
-      
+
       img.onerror = () => {
         console.error('Failed to load map image');
         message.error({ content: '地图图像加载失败', key: 'loadMap' });
         URL.revokeObjectURL(img.src);
       };
-      
+
       img.src = URL.createObjectURL(imageBlob);
-      
+
       // 注意：加载按钮只用于预览，不设置激活地图
       // 只有"设为默认"按钮才会调用 setActiveMapLocal
     } catch (error: any) {
@@ -614,7 +553,6 @@ const MapManagement: React.FC = () => {
 
   const handleDeleteMap = async (id: string) => {
     try {
-      console.log('Deleting map:', id);
       await mapApi.deleteMapLocal(id);
       message.success('删除成功');
       // 延迟刷新，确保文件系统操作完成
@@ -629,7 +567,6 @@ const MapManagement: React.FC = () => {
 
   const handleSetActive = async (id: string) => {
     try {
-      console.log('Setting active map:', id);
       await mapApi.setActiveMapLocal(id);
       message.success('已设置为默认地图');
       loadMaps();
@@ -903,7 +840,6 @@ const MapManagement: React.FC = () => {
           </Button>,
           <Button key="nosave" onClick={async () => {
             try {
-              console.log('用户选择不保存，直接停止建图节点');
               await mapApi.stopMappingLocal();
               setMappingStatus('idle');
               message.success('已退出建图（未保存）');
