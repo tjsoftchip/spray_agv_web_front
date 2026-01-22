@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Row, Col, Switch, Slider, Button, Space, message, Tag, InputNumber } from 'antd';
+import { Card, Row, Col, Switch, Button, Space, message, Tag, InputNumber } from 'antd';
 import { Joystick } from 'react-joystick-component';
 import { socketService } from '../services/socket';
 import { useOrientation } from '../hooks/useOrientation';
@@ -12,6 +12,8 @@ const DeviceControl: React.FC = () => {
   const [leftValveStatus, setLeftValveStatus] = useState(false);
   const [rightValveStatus, setRightValveStatus] = useState(false);
   const [armHeight, setArmHeight] = useState(1.0);
+  const [armHeightStatus, setArmHeightStatus] = useState(false); // 支架高度状态：false=落, true=起
+  const [limitSwitchState, setLimitSwitchState] = useState(0); // 限位开关状态：0=都未触发, 1=上限触发, 2=下限触发, 3=都触发
   const [controlMode, setControlMode] = useState<'auto' | 'manual'>('auto');
   const [velocity, setVelocity] = useState({ linear: 0, angular: 0 });
   const [isMoving, setIsMoving] = useState(false);
@@ -33,6 +35,8 @@ const DeviceControl: React.FC = () => {
         setLeftValveStatus(status.left_valve_status);
         setRightValveStatus(status.right_valve_status);
         setArmHeight(status.arm_height);
+        setArmHeightStatus(status.arm_height_status);
+        setLimitSwitchState(status.limit_switch_state || 0);
       }
     });
 
@@ -106,9 +110,11 @@ const DeviceControl: React.FC = () => {
     message.success(`${side === 'left' ? '左侧' : '右侧'}水阀已${checked ? '开启' : '关闭'}`);
   };
 
-  const handleHeightChange = (value: number) => {
-    setArmHeight(value);
-    publishRosCommand('/spray/height_control', 'std_msgs/Float32', { data: value });
+  const handleArmHeightToggle = (checked: boolean) => {
+    setArmHeightStatus(checked);
+    setArmHeight(checked ? 2.0 : 1.0);
+    publishRosCommand('/spray/arm_height_control', 'std_msgs/Bool', { data: checked });
+    message.success(`支架已${checked ? '升起' : '落下'}`);
   };
 
   const handleEmergencyStop = () => {
@@ -535,13 +541,16 @@ const DeviceControl: React.FC = () => {
                   }
                 }}
               >
-                <div style={{ 
-                  padding: '20px 0',
+                <div style={{
+                  padding: '16px',
                   background: '#f8f9fa',
                   borderRadius: 8,
-                  textAlign: 'center'
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center'
                 }}>
-                  <div style={{ 
+                  <div style={{
                     marginBottom: 16,
                     fontSize: 16,
                     fontWeight: 600,
@@ -559,7 +568,7 @@ const DeviceControl: React.FC = () => {
                       transform: 'scale(1.2)'
                     }}
                   />
-                  <div style={{ 
+                  <div style={{
                     marginTop: 12,
                     fontSize: 14,
                     color: pumpStatus ? '#28a745' : '#6c757d',
@@ -572,9 +581,9 @@ const DeviceControl: React.FC = () => {
             </Col>
 
             <Col xs={24} lg={12}>
-              <Card 
-                title="📏 支架高度" 
-                style={{ 
+              <Card
+                title="📏 支架高度控制"
+                style={{
                   borderRadius: 12,
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
                   border: 'none'
@@ -590,58 +599,57 @@ const DeviceControl: React.FC = () => {
                   }
                 }}
               >
-                <div style={{ padding: '20px 0' }}>
-                  <div style={{ 
-                    marginBottom: 24,
-                    textAlign: 'center',
-                    background: '#f8f9fa',
-                    padding: '16px',
-                    borderRadius: 8
+                <div style={{
+                  padding: '16px',
+                  background: '#f8f9fa',
+                  borderRadius: 8,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <div style={{
+                    marginBottom: 16,
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: '#495057'
                   }}>
-                    <div style={{ 
-                      fontSize: 14,
-                      color: '#6c757d',
-                      marginBottom: 8
-                    }}>
-                      当前高度
-                    </div>
-                    <div style={{ 
-                      fontSize: 24,
-                      fontWeight: 'bold',
-                      color: '#fa709a'
-                    }}>
-                      {armHeight.toFixed(2)} 米
-                    </div>
+                    支架状态
                   </div>
-                  <Slider
-                    min={0.5}
-                    max={2.5}
-                    step={0.1}
-                    value={armHeight}
-                    onChange={handleHeightChange}
-                    marks={{
-                      0.5: '0.5m',
-                      1.0: '1.0m',
-                      1.5: '1.5m',
-                      2.0: '2.0m',
-                      2.5: '2.5m',
-                    }}
-                    trackStyle={{
-                      background: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
-                    }}
-                    handleStyle={{
-                      borderColor: '#fa709a',
-                      boxShadow: '0 0 10px rgba(250, 112, 154, 0.5)'
+                  <Switch
+                    checked={armHeightStatus}
+                    onChange={handleArmHeightToggle}
+                    checkedChildren="起"
+                    unCheckedChildren="落"
+                    size="default"
+                    style={{
+                      transform: 'scale(1.2)'
                     }}
                   />
+                  <div style={{
+                    marginTop: 12,
+                    fontSize: 14,
+                    color: armHeightStatus ? '#28a745' : '#6c757d',
+                    fontWeight: 500
+                  }}>
+                    {armHeightStatus ? '🟢 支架已升起' : '🔴 支架已落下'}
+                  </div>
+                  <div style={{
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: limitSwitchState === 1 ? '#28a745' : limitSwitchState === 2 ? '#6c757d' : limitSwitchState === 0 ? '#ffc107' : '#dc3545',
+                    fontWeight: 400
+                  }}>
+                    {limitSwitchState === 1 ? '✓ 上限位已触发' : limitSwitchState === 2 ? '✓ 下限位已触发' : limitSwitchState === 0 ? '→ 限位未触发' : '⚠️ 限位异常'}
+                  </div>
                 </div>
               </Card>
             </Col>
 
             <Col xs={24} lg={12}>
-              <Card 
-                title="🦾 左侧展臂控制" 
-                style={{ 
+              <Card
+                title="🦾 左侧展臂控制"
+                style={{
                   borderRadius: 12,
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
                   border: 'none'
@@ -658,13 +666,16 @@ const DeviceControl: React.FC = () => {
                 }}
               >
                 <Space orientation="vertical" style={{ width: '100%' }} size="large">
-                  <div style={{ 
+                  <div style={{
                     background: '#f8f9fa',
                     padding: '16px',
                     borderRadius: 8,
-                    textAlign: 'center'
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}>
-                    <div style={{ 
+                    <div style={{
                       marginBottom: 16,
                       fontSize: 16,
                       fontWeight: 600,
@@ -672,33 +683,17 @@ const DeviceControl: React.FC = () => {
                     }}>
                       展臂状态
                     </div>
-                    <Space size="large">
-                      <Button
-                        type={leftArmStatus === 'open' ? 'primary' : 'default'}
-                        onClick={() => handleArmControl('left', 'open')}
-                        style={{
-                          borderRadius: 8,
-                          height: 40,
-                          width: 80,
-                          fontWeight: 600
-                        }}
-                      >
-                        打开
-                      </Button>
-                      <Button
-                        type={leftArmStatus === 'close' ? 'primary' : 'default'}
-                        onClick={() => handleArmControl('left', 'close')}
-                        style={{
-                          borderRadius: 8,
-                          height: 40,
-                          width: 80,
-                          fontWeight: 600
-                        }}
-                      >
-                        关闭
-                      </Button>
-                    </Space>
-                    <div style={{ 
+                    <Switch
+                      checked={leftArmStatus === 'open'}
+                      onChange={(checked) => handleArmControl('left', checked ? 'open' : 'close')}
+                      checkedChildren="开"
+                      unCheckedChildren="关"
+                      size="default"
+                      style={{
+                        transform: 'scale(1.2)'
+                      }}
+                    />
+                    <div style={{
                       marginTop: 12,
                       fontSize: 14,
                       color: leftArmStatus === 'open' ? '#28a745' : '#6c757d',
@@ -707,14 +702,17 @@ const DeviceControl: React.FC = () => {
                       {leftArmStatus === 'open' ? '🟢 展臂已打开' : '🔴 展臂已关闭'}
                     </div>
                   </div>
-                  
-                  <div style={{ 
+
+                  <div style={{
                     background: '#f8f9fa',
                     padding: '16px',
                     borderRadius: 8,
-                    textAlign: 'center'
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}>
-                    <div style={{ 
+                    <div style={{
                       marginBottom: 16,
                       fontSize: 16,
                       fontWeight: 600,
@@ -731,7 +729,7 @@ const DeviceControl: React.FC = () => {
                         transform: 'scale(1.2)'
                       }}
                     />
-                    <div style={{ 
+                    <div style={{
                       marginTop: 12,
                       fontSize: 14,
                       color: leftValveStatus ? '#28a745' : '#6c757d',
@@ -745,9 +743,9 @@ const DeviceControl: React.FC = () => {
             </Col>
 
             <Col xs={24} lg={12}>
-              <Card 
-                title="🦾 右侧展臂控制" 
-                style={{ 
+              <Card
+                title="🦾 右侧展臂控制"
+                style={{
                   borderRadius: 12,
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
                   border: 'none'
@@ -764,13 +762,16 @@ const DeviceControl: React.FC = () => {
                 }}
               >
                 <Space orientation="vertical" style={{ width: '100%' }} size="large">
-                  <div style={{ 
+                  <div style={{
                     background: '#f8f9fa',
                     padding: '16px',
                     borderRadius: 8,
-                    textAlign: 'center'
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}>
-                    <div style={{ 
+                    <div style={{
                       marginBottom: 16,
                       fontSize: 16,
                       fontWeight: 600,
@@ -778,33 +779,17 @@ const DeviceControl: React.FC = () => {
                     }}>
                       展臂状态
                     </div>
-                    <Space size="large">
-                      <Button
-                        type={rightArmStatus === 'open' ? 'primary' : 'default'}
-                        onClick={() => handleArmControl('right', 'open')}
-                        style={{
-                          borderRadius: 8,
-                          height: 40,
-                          width: 80,
-                          fontWeight: 600
-                        }}
-                      >
-                        打开
-                      </Button>
-                      <Button
-                        type={rightArmStatus === 'close' ? 'primary' : 'default'}
-                        onClick={() => handleArmControl('right', 'close')}
-                        style={{
-                          borderRadius: 8,
-                          height: 40,
-                          width: 80,
-                          fontWeight: 600
-                        }}
-                      >
-                        关闭
-                      </Button>
-                    </Space>
-                    <div style={{ 
+                    <Switch
+                      checked={rightArmStatus === 'open'}
+                      onChange={(checked) => handleArmControl('right', checked ? 'open' : 'close')}
+                      checkedChildren="开"
+                      unCheckedChildren="关"
+                      size="default"
+                      style={{
+                        transform: 'scale(1.2)'
+                      }}
+                    />
+                    <div style={{
                       marginTop: 12,
                       fontSize: 14,
                       color: rightArmStatus === 'open' ? '#28a745' : '#6c757d',
@@ -813,14 +798,17 @@ const DeviceControl: React.FC = () => {
                       {rightArmStatus === 'open' ? '🟢 展臂已打开' : '🔴 展臂已关闭'}
                     </div>
                   </div>
-                  
-                  <div style={{ 
+
+                  <div style={{
                     background: '#f8f9fa',
                     padding: '16px',
                     borderRadius: 8,
-                    textAlign: 'center'
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}>
-                    <div style={{ 
+                    <div style={{
                       marginBottom: 16,
                       fontSize: 16,
                       fontWeight: 600,
@@ -837,7 +825,7 @@ const DeviceControl: React.FC = () => {
                         transform: 'scale(1.2)'
                       }}
                     />
-                    <div style={{ 
+                    <div style={{
                       marginTop: 12,
                       fontSize: 14,
                       color: rightValveStatus ? '#28a745' : '#6c757d',
