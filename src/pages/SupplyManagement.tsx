@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Progress, Button, Space, Statistic, Tag, message, Modal, Form, Input, InputNumber, Select, Table, Popconfirm, Switch } from 'antd';
-import { ThunderboltOutlined, ExperimentOutlined, EnvironmentOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Card, Row, Col, Button, Space, Statistic, Tag, message, Modal, Form, Input, InputNumber, Select, Table, Popconfirm, Switch } from 'antd';
+import { EnvironmentOutlined, PlusOutlined, EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { socketService } from '../services/socket';
 import { supplyStationApi, supplyManagementApi } from '../services/api';
 
@@ -15,6 +15,8 @@ const SupplyManagement: React.FC = () => {
     waterThreshold: 20,
     batteryThreshold: 20,
   });
+  const [relayStatus, setRelayStatus] = useState<any>(null);
+  const [chargingStatus, setChargingStatus] = useState<any>(null);
   const [stations, setStations] = useState<any[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingStation, setEditingStation] = useState<any>(null);
@@ -23,45 +25,176 @@ const SupplyManagement: React.FC = () => {
   const [systemMetrics, setSystemMetrics] = useState<any>(null);
   const [taskStatus, setTaskStatus] = useState<any>(null);
   const [form] = Form.useForm();
+  const [networkConfig, setNetworkConfig] = useState({
+    relay_ip: '192.168.4.1',
+    relay_port: 80,
+    charging_ip: '192.168.1.100',
+    charging_port: 502
+  });
+
+  const loadNetworkConfig = async () => {
+    try {
+      const response = await fetch('/api/settings');
+      const data = await response.json();
+      
+      console.log('Settings API response:', data);
+      
+      // Settings API returns grouped configs by category
+      // Search across all categories to find network config
+      let relay_ip = '192.168.4.1';
+      let relay_port = 80;
+      let charging_ip = '192.168.1.100';
+      let charging_port = 502;
+
+      // Search in all categories
+      for (const category in data) {
+        if (Array.isArray(data[category])) {
+          const foundRelayIp = data[category].find((item: any) => item.key === 'relay_ip');
+          const foundRelayPort = data[category].find((item: any) => item.key === 'relay_port');
+          const foundChargingIp = data[category].find((item: any) => item.key === 'charging_ip');
+          const foundChargingPort = data[category].find((item: any) => item.key === 'charging_port');
+          
+          if (foundRelayIp) relay_ip = foundRelayIp.value;
+          if (foundRelayPort) relay_port = parseInt(foundRelayPort.value);
+          if (foundChargingIp) charging_ip = foundChargingIp.value;
+          if (foundChargingPort) charging_port = parseInt(foundChargingPort.value);
+        }
+      }
+
+      const config = {
+        relay_ip,
+        relay_port,
+        charging_ip,
+        charging_port
+      };
+      
+      console.log('Loaded network config:', config);
+      setNetworkConfig(config);
+    } catch (error) {
+      console.error('加载网络配置失败:', error);
+    }
+  };
+
+  const loadRelayStatus = async () => {
+    try {
+      const data = await supplyManagementApi.getRelayStatus(networkConfig.relay_ip);
+      setRelayStatus(data);
+    } catch (error: any) {
+      console.error('加载补水站状态失败:', error);
+      // 设置为离线状态
+      setRelayStatus({
+        status: 'error',
+        relay: false,
+        mode: 0,
+        ip: networkConfig.relay_ip,
+        apIp: '',
+        connected: false,
+        error: error.message || '设备未连接',
+        lastUpdate: new Date().toISOString()
+      });
+    }
+  };
+
+  const loadChargingStatus = async () => {
+    try {
+      const data = await supplyManagementApi.getChargingStatus(networkConfig.charging_ip);
+      setChargingStatus(data);
+    } catch (error: any) {
+      console.error('加载充电桩状态失败:', error);
+      // 设置为离线状态
+      setChargingStatus({
+        chargingStatus: 0,
+        brushStatus: 0,
+        chargingMode: 0,
+        batteryVoltage: 0,
+        chargingCurrent: 0,
+        endCurrent: 0,
+        heartbeat: 0,
+        lastUpdate: new Date().toISOString(),
+        connected: false,
+        error: error.message || '设备未连接',
+        ipAddress: networkConfig.charging_ip,
+        port: networkConfig.charging_port
+      });
+    }
+  };
 
   useEffect(() => {
     socketService.connect();
-    loadStations();
-    loadAvailablePoints();
-    loadGPUMetrics();
-    loadSystemMetrics();
-    loadTaskStatus();
+    
+    // 先加载网络配置，然后加载其他数据
+    const initializeData = async () => {
+      await loadNetworkConfig();
+      loadStations();
+      loadAvailablePoints();
+      loadGPUMetrics();
+      loadSystemMetrics();
+      loadTaskStatus();
+    };
+    
+    initializeData();
 
-    // 定期刷新数据
+    // 定期刷新数据 - 降低频率以减少错误日志
     const interval = setInterval(() => {
       loadGPUMetrics();
       loadSystemMetrics();
       loadTaskStatus();
-    }, 5000);
+      // 只在设备在线时才频繁查询状态，否则降低频率
+      if (relayStatus?.connected) {
+        loadRelayStatus();
+      }
+      if (chargingStatus?.connected) {
+        loadChargingStatus();
+      }
+    }, 15000);
+
+    // 离线设备的低频轮询
+    const offlineInterval = setInterval(() => {
+      if (!relayStatus?.connected) {
+        loadRelayStatus();
+      }
+      if (!chargingStatus?.connected) {
+        loadChargingStatus();
+      }
+    }, 30000);
 
     socketService.on('ros_message', (data) => {
       if (data.topic === '/supply_status') {
         const status = JSON.parse(data.msg.data);
-        setSupplyStatus(prev => ({ ...prev, ...status }));
-        
-        // 自动补给逻辑
-        if (prev.autoSupplyEnabled && prev.status === 'idle') {
-          const needSupply = status.waterLevel < prev.waterThreshold || 
-                           status.batteryLevel < prev.batteryThreshold;
-          
-          if (needSupply) {
-            console.log('自动触发补给流程');
-            handleStartSupply();
+        setSupplyStatus(prev => {
+          // 自动补给逻辑
+          if (prev.autoSupplyEnabled && prev.status === 'idle') {
+            const needSupply = status.waterLevel < prev.waterThreshold ||
+                             status.batteryLevel < prev.batteryThreshold;
+
+            if (needSupply) {
+              console.log('自动触发补给流程');
+              handleStartSupply();
+            }
           }
-        }
+          return { ...prev, ...status };
+        });
       }
     });
 
     return () => {
       socketService.off('ros_message');
       clearInterval(interval);
+      clearInterval(offlineInterval);
     };
-  }, []);
+  }, [relayStatus?.connected, chargingStatus?.connected]);
+
+  // 当网络配置更新后，加载设备状态
+  useEffect(() => {
+    // 只在网络配置从默认值更新到实际值时才加载
+    const hasValidConfig = networkConfig.relay_ip !== '192.168.4.1' && networkConfig.charging_ip !== '192.168.1.100';
+    
+    if (hasValidConfig && (!relayStatus || relayStatus.ip !== networkConfig.relay_ip || chargingStatus?.ipAddress !== networkConfig.charging_ip)) {
+      console.log('Network config updated, loading device status...');
+      loadRelayStatus();
+      loadChargingStatus();
+    }
+  }, [networkConfig.relay_ip, networkConfig.charging_ip, relayStatus?.ip, chargingStatus?.ipAddress]);
 
   const loadStations = async () => {
     try {
@@ -123,9 +256,11 @@ const SupplyManagement: React.FC = () => {
         z: 0,
         orientation: { x: 0, y: 0, z: 0, w: 1 }
       };
-      
+
       form.setFieldsValue({
-        position: currentPosition.position,
+        x: currentPosition.x,
+        y: currentPosition.y,
+        z: currentPosition.z,
         orientation: currentPosition.orientation
       });
       
@@ -199,24 +334,44 @@ const SupplyManagement: React.FC = () => {
     message.info('导航到补给站');
   };
 
-  const handleStartCharging = () => {
-    sendSupplyCommand('start_charging');
-    message.success('开始充电');
+  const handleStartCharging = async () => {
+    try {
+      await supplyManagementApi.startCharging(networkConfig.charging_ip);
+      message.success('开始充电');
+      loadChargingStatus();
+    } catch (error: any) {
+      message.error('开始充电失败');
+    }
   };
 
-  const handleStopCharging = () => {
-    sendSupplyCommand('stop_charging');
-    message.success('停止充电');
+  const handleStopCharging = async () => {
+    try {
+      await supplyManagementApi.stopCharging(networkConfig.charging_ip);
+      message.success('停止充电');
+      loadChargingStatus();
+    } catch (error: any) {
+      message.error('停止充电失败');
+    }
   };
 
-  const handleStartWatering = () => {
-    sendSupplyCommand('start_watering');
-    message.success('开始注水');
+  const handleStartWatering = async () => {
+    try {
+      await supplyManagementApi.startWateringRelay(networkConfig.relay_ip);
+      message.success('开始注水');
+      loadRelayStatus();
+    } catch (error: any) {
+      message.error('开始注水失败');
+    }
   };
 
-  const handleStopWatering = () => {
-    sendSupplyCommand('stop_watering');
-    message.success('停止注水');
+  const handleStopWatering = async () => {
+    try {
+      await supplyManagementApi.stopWateringRelay(networkConfig.relay_ip);
+      message.success('停止注水');
+      loadRelayStatus();
+    } catch (error: any) {
+      message.error('停止注水失败');
+    }
   };
 
   const handleManualSupply = () => {
@@ -575,13 +730,87 @@ const SupplyManagement: React.FC = () => {
             <Row gutter={[24, 16]}>
               <Col xs={24} lg={12}>
                 <Card size="small" title="⚡ 充电控制" style={{ background: '#f0f8ff' }}>
+                  {chargingStatus ? (
+                    <div style={{ marginBottom: '16px', padding: '12px', background: chargingStatus.connected ? '#fff' : '#fff2f0', borderRadius: '8px', border: chargingStatus.connected ? '1px solid #d9d9d9' : '1px solid #ffccc7' }}>
+                      <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '14px', fontWeight: 'bold' }}>设备状态</span>
+                        {chargingStatus.connected ? (
+                          <Tag color="green" icon={<CheckOutlined />}>在线</Tag>
+                        ) : (
+                          <Tag color="red" icon={<CloseOutlined />}>离线</Tag>
+                        )}
+                      </div>
+                      {chargingStatus.connected ? (
+                        <Row gutter={[16, 8]}>
+                          <Col xs={12}>
+                            <div style={{ fontSize: '12px', color: '#666' }}>充电状态</div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                              {chargingStatus.chargingStatus === 0 ? '未在充电' : 
+                               chargingStatus.chargingStatus === 1 ? '正在充电' : 
+                               chargingStatus.chargingStatus === 2 ? '充电完成' : '未知'}
+                            </div>
+                          </Col>
+                          <Col xs={12}>
+                            <div style={{ fontSize: '12px', color: '#666' }}>充电刷状态</div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                              {chargingStatus.brushStatus === 0 ? '已缩回' : 
+                               chargingStatus.brushStatus === 1 ? '正在伸出' : 
+                               chargingStatus.brushStatus === 2 ? '正在缩回' : 
+                               chargingStatus.brushStatus === 3 ? '已伸出' : '未知'}
+                            </div>
+                          </Col>
+                          <Col xs={12}>
+                            <div style={{ fontSize: '12px', color: '#666' }}>电池电压</div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                              {(chargingStatus.batteryVoltage / 10).toFixed(1)}V
+                            </div>
+                          </Col>
+                          <Col xs={12}>
+                            <div style={{ fontSize: '12px', color: '#666' }}>充电电流</div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                              {chargingStatus.chargingCurrent}mA
+                            </div>
+                          </Col>
+                          <Col xs={12}>
+                            <div style={{ fontSize: '12px', color: '#666' }}>充电模式</div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                              {chargingStatus.chargingMode === 0 ? '手动' : '自动'}
+                            </div>
+                          </Col>
+                          <Col xs={12}>
+                            <div style={{ fontSize: '12px', color: '#666' }}>心跳</div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                              {chargingStatus.heartbeat}
+                            </div>
+                          </Col>
+                        </Row>
+                      ) : (
+                        <div style={{ textAlign: 'center', color: '#ff4d4f', padding: '8px 0' }}>
+                          <div style={{ fontSize: '16px', marginBottom: '8px' }}>⚠️</div>
+                          <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>设备未连接</div>
+                          <div style={{ fontSize: '12px', color: '#666' }}>
+                            IP: {chargingStatus.ipAddress}:{chargingStatus.port}
+                          </div>
+                          {chargingStatus.error && (
+                            <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                              {chargingStatus.error}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ marginBottom: '16px', padding: '12px', background: '#f5f5f5', borderRadius: '8px', textAlign: 'center', color: '#999' }}>
+                      加载中...
+                    </div>
+                  )}
                   <Row gutter={[8, 8]}>
                     <Col xs={12}>
                       <Button
                         type="primary"
                         block
                         onClick={handleStartCharging}
-                        disabled={!supplyStatus.chargingEnabled}
+                        disabled={!supplyStatus.chargingEnabled || !chargingStatus?.connected || chargingStatus?.chargingStatus === 1}
                         style={{ height: '40px' }}
                       >
                         开始充电
@@ -591,6 +820,7 @@ const SupplyManagement: React.FC = () => {
                       <Button
                         block
                         onClick={handleStopCharging}
+                        disabled={!chargingStatus?.connected || chargingStatus?.chargingStatus === 0}
                         style={{ height: '40px' }}
                       >
                         停止充电
@@ -601,13 +831,76 @@ const SupplyManagement: React.FC = () => {
               </Col>
               <Col xs={24} lg={12}>
                 <Card size="small" title="💧 注水控制" style={{ background: '#f0f8ff' }}>
+                  {relayStatus ? (
+                    <div style={{ marginBottom: '16px', padding: '12px', background: relayStatus.connected ? '#fff' : '#fff2f0', borderRadius: '8px', border: relayStatus.connected ? '1px solid #d9d9d9' : '1px solid #ffccc7' }}>
+                      <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '14px', fontWeight: 'bold' }}>设备状态</span>
+                        {relayStatus.connected ? (
+                          <Tag color="green" icon={<CheckOutlined />}>在线</Tag>
+                        ) : (
+                          <Tag color="red" icon={<CloseOutlined />}>离线</Tag>
+                        )}
+                      </div>
+                      {relayStatus.connected ? (
+                        <Row gutter={[16, 8]}>
+                          <Col xs={12}>
+                            <div style={{ fontSize: '12px', color: '#666' }}>继电器状态</div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                              {relayStatus.relay ? (
+                                <Tag color="green">已开启</Tag>
+                              ) : (
+                                <Tag color="default">已关闭</Tag>
+                              )}
+                            </div>
+                          </Col>
+                          <Col xs={12}>
+                            <div style={{ fontSize: '12px', color: '#666' }}>工作模式</div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                              {relayStatus.mode === 0 ? 'AP模式' : 
+                               relayStatus.mode === 1 ? '客户端模式' : 
+                               relayStatus.mode === 2 ? 'AP+客户端' : '未知'}
+                            </div>
+                          </Col>
+                          <Col xs={12}>
+                            <div style={{ fontSize: '12px', color: '#666' }}>设备IP</div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                              {relayStatus.ip || 'N/A'}
+                            </div>
+                          </Col>
+                          <Col xs={12}>
+                            <div style={{ fontSize: '12px', color: '#666' }}>AP IP</div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                              {relayStatus.apIp || 'N/A'}
+                            </div>
+                          </Col>
+                        </Row>
+                      ) : (
+                        <div style={{ textAlign: 'center', color: '#ff4d4f', padding: '8px 0' }}>
+                          <div style={{ fontSize: '16px', marginBottom: '8px' }}>⚠️</div>
+                          <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>设备未连接</div>
+                          <div style={{ fontSize: '12px', color: '#666' }}>
+                            IP: {relayStatus.ip}
+                          </div>
+                          {relayStatus.error && (
+                            <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                              {relayStatus.error}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ marginBottom: '16px', padding: '12px', background: '#f5f5f5', borderRadius: '8px', textAlign: 'center', color: '#999' }}>
+                      加载中...
+                    </div>
+                  )}
                   <Row gutter={[8, 8]}>
                     <Col xs={12}>
                       <Button
                         type="primary"
                         block
                         onClick={handleStartWatering}
-                        disabled={!supplyStatus.wateringEnabled}
+                        disabled={!supplyStatus.wateringEnabled || !relayStatus?.connected || relayStatus?.relay}
                         style={{ height: '40px' }}
                       >
                         开始注水
@@ -617,6 +910,7 @@ const SupplyManagement: React.FC = () => {
                       <Button
                         block
                         onClick={handleStopWatering}
+                        disabled={!relayStatus?.connected || !relayStatus?.relay}
                         style={{ height: '40px' }}
                       >
                         停止注水

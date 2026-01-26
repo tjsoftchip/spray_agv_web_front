@@ -27,10 +27,11 @@ interface NavigationStatus {
 const StatusMonitor: React.FC = () => {
   // 机器人位置（初始为世界坐标原点，等待从 ROS2 获取实际位置）
   const [robotPosition, setRobotPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [batteryLevel, setBatteryLevel] = useState(85);
-  const [waterLevel, setWaterLevel] = useState(70);
+  const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
+  const [waterLevel, setWaterLevel] = useState<number | null>(null);
   const [linearVelocity, setLinearVelocity] = useState(0); // 线速度 m/s
   const [angularVelocity, setAngularVelocity] = useState(0); // 角速度 rad/s
+  const [dataLoading, setDataLoading] = useState(true); // 数据加载状态
 
   // 地图加载完成回调
   const handleMapLoaded = (mapInfo: { origin: { x: number; y: number; z: number }; resolution: number; width: number; height: number }) => {
@@ -139,6 +140,18 @@ const StatusMonitor: React.FC = () => {
         setAngularVelocity(angularVel);
       }
       
+      // 处理电池电量实时更新
+      if (data.topic === '/battery_level' && data.msg) {
+        const batteryValue = Math.round(data.msg.data || 0);
+        setBatteryLevel(batteryValue);
+      }
+      
+      // 处理水位实时更新
+      if (data.topic === '/water_monitor/level' && data.msg) {
+        const waterValue = Math.round(data.msg.data || 0);
+        setWaterLevel(waterValue);
+      }
+      
       if (data.topic === '/camera/color/image_raw' && data.msg) {
         if (!enableCameraPreviewRef.current) {
           return;
@@ -214,13 +227,56 @@ const StatusMonitor: React.FC = () => {
     subscribeToRobotPose();
     loadInitialData();
 
-    const interval = setInterval(() => {
-      setBatteryLevel((prev) => Math.max(0, prev - 0.1));
-      setWaterLevel((prev) => Math.max(0, prev - 0.15));
-    }, 1000);
+    // 订阅电池和水位数据
+    const subscribeToBatteryAndWater = () => {
+      // 订阅电池电量
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/battery_level',
+        type: 'std_msgs/Float32'
+      });
+
+      // 订阅水位
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/water_monitor/level',
+        type: 'std_msgs/Float32'
+      });
+    };
+
+    subscribeToBatteryAndWater();
+
+    // 定时获取电池和水位状态（每10秒）
+    const statusInterval = setInterval(async () => {
+      try {
+        // 获取电池状态
+        const batteryResponse = await fetch('/api/robot/battery/status', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        if (batteryResponse.ok) {
+          const batteryData = await batteryResponse.json();
+          setBatteryLevel(batteryData.batteryLevel || 0);
+        }
+
+        // 获取水位状态
+        const waterResponse = await fetch('/api/robot/water/status', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        if (waterResponse.ok) {
+          const waterData = await waterResponse.json();
+          setWaterLevel(waterData.waterLevel || 0);
+        }
+      } catch (error) {
+        console.error('Failed to fetch battery or water status:', error);
+      }
+    }, 10000);
 
     return () => {
-      clearInterval(interval);
+      clearInterval(statusInterval);
       
       if (socketConnectedRef.current) {
         socketService.off('ros_message', handleRosMessage);
@@ -232,6 +288,8 @@ const StatusMonitor: React.FC = () => {
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/robot_pose' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/amcl_pose' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/odom' });
+        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/battery_level' });
+        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/water_monitor/level' });
         
         socketService.disconnect();
         socketConnectedRef.current = false;
@@ -254,10 +312,33 @@ const StatusMonitor: React.FC = () => {
 
   const loadInitialData = async () => {
     try {
-      const obstacleData = await obstacleApi.getStatus();
-      setObstacleStatus(obstacleData);
+      // 并行加载所有初始数据
+      const [obstacleData, batteryData, waterData] = await Promise.all([
+        obstacleApi.getStatus().catch(() => null),
+        fetch('/api/robot/battery/status', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        }).then(res => res.ok ? res.json() : null).catch(() => null),
+        fetch('/api/robot/water/status', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        }).then(res => res.ok ? res.json() : null).catch(() => null)
+      ]);
+
+      if (obstacleData) {
+        setObstacleStatus(obstacleData);
+      }
+
+      if (batteryData && batteryData.batteryLevel !== undefined) {
+        setBatteryLevel(batteryData.batteryLevel);
+      }
+
+      if (waterData && waterData.waterLevel !== undefined) {
+        setWaterLevel(waterData.waterLevel);
+      }
+
+      setDataLoading(false);
     } catch (error) {
       console.error('Failed to load initial data:', error);
+      setDataLoading(false);
     }
   };
 
@@ -360,21 +441,34 @@ const StatusMonitor: React.FC = () => {
               <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
                 🔋 电池电量
               </div>
-              <div style={{ 
-                fontSize: '28px', 
-                fontWeight: 600, 
-                color: batteryLevel > 20 ? '#52c41a' : '#ff4d4f',
-                marginBottom: '8px'
-              }}>
-                {batteryLevel.toFixed(2)}%
-              </div>
-              <Progress 
-                percent={parseFloat(batteryLevel.toFixed(2))} 
-                size="small" 
-                showInfo={false}
-                status={batteryLevel > 20 ? 'active' : 'exception'}
-                strokeColor={batteryLevel > 20 ? '#52c41a' : '#ff4d4f'}
-              />
+              {dataLoading || batteryLevel === null ? (
+                <div style={{ 
+                  fontSize: '28px', 
+                  fontWeight: 600, 
+                  color: '#999',
+                  marginBottom: '8px'
+                }}>
+                  加载中...
+                </div>
+              ) : (
+                <>
+                  <div style={{ 
+                    fontSize: '28px', 
+                    fontWeight: 600, 
+                    color: batteryLevel > 20 ? '#52c41a' : '#ff4d4f',
+                    marginBottom: '8px'
+                  }}>
+                    {batteryLevel.toFixed(2)}%
+                  </div>
+                  <Progress 
+                    percent={parseFloat(batteryLevel.toFixed(2))} 
+                    size="small" 
+                    showInfo={false}
+                    status={batteryLevel > 20 ? 'active' : 'exception'}
+                    strokeColor={batteryLevel > 20 ? '#52c41a' : '#ff4d4f'}
+                  />
+                </>
+              )}
             </div>
           </Card>
         </Col>
@@ -393,21 +487,34 @@ const StatusMonitor: React.FC = () => {
               <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
                 💧 水箱水位
               </div>
-              <div style={{ 
-                fontSize: '28px', 
-                fontWeight: 600, 
-                color: waterLevel > 10 ? '#1890ff' : '#ff4d4f',
-                marginBottom: '8px'
-              }}>
-                {waterLevel.toFixed(2)}%
-              </div>
-              <Progress 
-                percent={parseFloat(waterLevel.toFixed(2))} 
-                size="small" 
-                showInfo={false}
-                status={waterLevel > 10 ? 'active' : 'exception'}
-                strokeColor={waterLevel > 10 ? '#1890ff' : '#ff4d4f'}
-              />
+              {dataLoading || waterLevel === null ? (
+                <div style={{ 
+                  fontSize: '28px', 
+                  fontWeight: 600, 
+                  color: '#999',
+                  marginBottom: '8px'
+                }}>
+                  加载中...
+                </div>
+              ) : (
+                <>
+                  <div style={{ 
+                    fontSize: '28px', 
+                    fontWeight: 600, 
+                    color: waterLevel > 10 ? '#1890ff' : '#ff4d4f',
+                    marginBottom: '8px'
+                  }}>
+                    {waterLevel.toFixed(2)}%
+                  </div>
+                  <Progress 
+                    percent={parseFloat(waterLevel.toFixed(2))} 
+                    size="small" 
+                    showInfo={false}
+                    status={waterLevel > 10 ? 'active' : 'exception'}
+                    strokeColor={waterLevel > 10 ? '#1890ff' : '#ff4d4f'}
+                  />
+                </>
+              )}
             </div>
           </Card>
         </Col>

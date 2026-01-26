@@ -191,6 +191,17 @@ export const supplyManagementApi = {
   // 系统监控
   getSystemMetrics: () => apiService.get('/supply/management/system/metrics'),
   getNodeStatus: () => apiService.get('/supply/management/system/nodes'),
+  
+  // 补水站继电器控制
+  getRelayStatus: (relayIp?: string) => apiService.get('/supply/management/watering/relay/status', { params: { relayIp } }),
+  startWateringRelay: (relayIp?: string) => apiService.post('/supply/management/watering/relay/start', { relayIp }),
+  stopWateringRelay: (relayIp?: string) => apiService.post('/supply/management/watering/relay/stop', { relayIp }),
+  getRelayWifiInfo: (relayIp?: string) => apiService.get('/supply/management/watering/relay/wifi', { params: { relayIp } }),
+  
+  // 充电桩Modbus控制
+  getChargingStatus: (chargingIp?: string) => apiService.get('/supply/management/charging/status', { params: { chargingIp } }),
+  startCharging: (chargingIp?: string) => apiService.post('/supply/management/charging/start', { chargingIp }),
+  stopCharging: (chargingIp?: string) => apiService.post('/supply/management/charging/stop', { chargingIp }),
 };
 
 export const robotApi = {

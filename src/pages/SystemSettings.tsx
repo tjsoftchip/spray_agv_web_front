@@ -13,7 +13,7 @@ const SystemSettings: React.FC = () => {
 
   const loadConfig = async () => {
     try {
-      const response = await fetch('http://localhost:3000/api/settings');
+      const response = await fetch('/api/settings');
       const configs = await response.json();
       
       // 扁平化配置对象
@@ -56,6 +56,10 @@ const SystemSettings: React.FC = () => {
         camera_height: 480,
         camera_fps: 30,
         camera_enable_depth: true,
+        relay_ip: '192.168.4.1',
+        relay_port: 80,
+        charging_ip: '192.168.1.100',
+        charging_port: 502,
       });
     }
   };
@@ -72,7 +76,7 @@ const SystemSettings: React.FC = () => {
         category: getCategoryByKey(key)
       }));
       
-      await fetch('http://localhost:3000/api/settings/batch-update', {
+      await fetch('/api/settings/batch-update', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -111,6 +115,10 @@ const SystemSettings: React.FC = () => {
       camera_height: 'camera',
       camera_fps: 'camera',
       camera_enable_depth: 'camera',
+      relay_ip: 'network',
+      relay_port: 'network',
+      charging_ip: 'network',
+      charging_port: 'network',
     };
     return categoryMap[key] || 'general';
   };
@@ -196,7 +204,43 @@ const SystemSettings: React.FC = () => {
             <InputNumber min={5} max={50} step={1} style={{ width: '100%' }} />
           </Form.Item>
 
-          
+          <Divider>网络配置</Divider>
+
+          <Divider>补水站继电器配置</Divider>
+
+          <Form.Item
+            name="relay_ip"
+            label="补水站IP地址"
+            rules={[{ required: true, message: '请输入补水站IP地址' }]}
+          >
+            <Input placeholder="192.168.4.1" />
+          </Form.Item>
+
+          <Form.Item
+            name="relay_port"
+            label="补水站端口"
+            rules={[{ required: true, message: '请输入补水站端口' }]}
+          >
+            <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+          </Form.Item>
+
+          <Divider>充电桩配置</Divider>
+
+          <Form.Item
+            name="charging_ip"
+            label="充电桩IP地址"
+            rules={[{ required: true, message: '请输入充电桩IP地址' }]}
+          >
+            <Input placeholder="192.168.1.100" />
+          </Form.Item>
+
+          <Form.Item
+            name="charging_port"
+            label="充电桩端口"
+            rules={[{ required: true, message: '请输入充电桩端口' }]}
+          >
+            <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+          </Form.Item>
 
           <Divider />
 
