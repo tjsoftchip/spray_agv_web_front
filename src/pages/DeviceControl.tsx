@@ -523,9 +523,9 @@ const DeviceControl: React.FC = () => {
       <div style={{ padding: '0 8px' }}>
         <Row gutter={[24, 24]}>
           <Col xs={24} lg={12}>
-              <Card 
-                title="💧 水泵控制" 
-                style={{ 
+              <Card
+                title="💧 水泵控制"
+                style={{
                   borderRadius: 12,
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
                   border: 'none'
@@ -541,42 +541,44 @@ const DeviceControl: React.FC = () => {
                   }
                 }}
               >
-                <div style={{
-                  padding: '16px',
-                  background: '#f8f9fa',
-                  borderRadius: 8,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
+                <Space orientation="vertical" style={{ width: '100%' }} size="large">
                   <div style={{
-                    marginBottom: 16,
-                    fontSize: 16,
-                    fontWeight: 600,
-                    color: '#495057'
+                    padding: '16px',
+                    background: '#f8f9fa',
+                    borderRadius: 8,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}>
-                    水泵状态
+                    <div style={{
+                      marginBottom: 16,
+                      fontSize: 16,
+                      fontWeight: 600,
+                      color: '#495057'
+                    }}>
+                      水泵状态
+                    </div>
+                    <Switch
+                      checked={pumpStatus}
+                      onChange={handlePumpToggle}
+                      checkedChildren="开"
+                      unCheckedChildren="关"
+                      size="default"
+                      style={{
+                        transform: 'scale(1.2)'
+                      }}
+                    />
+                    <div style={{
+                      marginTop: 12,
+                      fontSize: 14,
+                      color: pumpStatus ? '#28a745' : '#6c757d',
+                      fontWeight: 500
+                    }}>
+                      {pumpStatus ? '🟢 水泵正在运行' : '🔴 水泵已停止'}
+                    </div>
                   </div>
-                  <Switch
-                    checked={pumpStatus}
-                    onChange={handlePumpToggle}
-                    checkedChildren="开"
-                    unCheckedChildren="关"
-                    size="default"
-                    style={{
-                      transform: 'scale(1.2)'
-                    }}
-                  />
-                  <div style={{
-                    marginTop: 12,
-                    fontSize: 14,
-                    color: pumpStatus ? '#28a745' : '#6c757d',
-                    fontWeight: 500
-                  }}>
-                    {pumpStatus ? '🟢 水泵正在运行' : '🔴 水泵已停止'}
-                  </div>
-                </div>
+                </Space>
               </Card>
             </Col>
 
@@ -599,50 +601,52 @@ const DeviceControl: React.FC = () => {
                   }
                 }}
               >
-                <div style={{
-                  padding: '16px',
-                  background: '#f8f9fa',
-                  borderRadius: 8,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
+                <Space orientation="vertical" style={{ width: '100%' }} size="large">
                   <div style={{
-                    marginBottom: 16,
-                    fontSize: 16,
-                    fontWeight: 600,
-                    color: '#495057'
+                    padding: '16px',
+                    background: '#f8f9fa',
+                    borderRadius: 8,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}>
-                    支架状态
+                    <div style={{
+                      marginBottom: 16,
+                      fontSize: 16,
+                      fontWeight: 600,
+                      color: '#495057'
+                    }}>
+                      支架状态
+                    </div>
+                    <Switch
+                      checked={armHeightStatus}
+                      onChange={handleArmHeightToggle}
+                      checkedChildren="起"
+                      unCheckedChildren="落"
+                      size="default"
+                      style={{
+                        transform: 'scale(1.2)'
+                      }}
+                    />
+                    <div style={{
+                      marginTop: 12,
+                      fontSize: 14,
+                      color: armHeightStatus ? '#28a745' : '#6c757d',
+                      fontWeight: 500
+                    }}>
+                      {armHeightStatus ? '🟢 支架已升起' : '🔴 支架已落下'}
+                    </div>
+                    <div style={{
+                      marginTop: 8,
+                      fontSize: 12,
+                      color: limitSwitchState === 1 ? '#28a745' : limitSwitchState === 2 ? '#6c757d' : limitSwitchState === 0 ? '#ffc107' : '#dc3545',
+                      fontWeight: 400
+                    }}>
+                      {limitSwitchState === 1 ? '✓ 上限位已触发' : limitSwitchState === 2 ? '✓ 下限位已触发' : limitSwitchState === 0 ? '→ 限位未触发' : '⚠️ 限位异常'}
+                    </div>
                   </div>
-                  <Switch
-                    checked={armHeightStatus}
-                    onChange={handleArmHeightToggle}
-                    checkedChildren="起"
-                    unCheckedChildren="落"
-                    size="default"
-                    style={{
-                      transform: 'scale(1.2)'
-                    }}
-                  />
-                  <div style={{
-                    marginTop: 12,
-                    fontSize: 14,
-                    color: armHeightStatus ? '#28a745' : '#6c757d',
-                    fontWeight: 500
-                  }}>
-                    {armHeightStatus ? '🟢 支架已升起' : '🔴 支架已落下'}
-                  </div>
-                  <div style={{
-                    marginTop: 8,
-                    fontSize: 12,
-                    color: limitSwitchState === 1 ? '#28a745' : limitSwitchState === 2 ? '#6c757d' : limitSwitchState === 0 ? '#ffc107' : '#dc3545',
-                    fontWeight: 400
-                  }}>
-                    {limitSwitchState === 1 ? '✓ 上限位已触发' : limitSwitchState === 2 ? '✓ 下限位已触发' : limitSwitchState === 0 ? '→ 限位未触发' : '⚠️ 限位异常'}
-                  </div>
-                </div>
+                </Space>
               </Card>
             </Col>
 

@@ -572,63 +572,7 @@ const SupplyManagement: React.FC = () => {
 
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>补给管理</h1>
-        <p style={{ margin: '8px 0 0 0', color: '#666' }}>智能补给站管理与控制系统</p>
-      </div>
-
       <Row gutter={[24, 24]}>
-        <Col xs={24} lg={8}>
-          <Card 
-            style={{ 
-              borderRadius: '12px', 
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              color: 'white'
-            }}
-          >
-            <div style={{ textAlign: 'center', padding: '16px 0' }}>
-              <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚡</div>
-              <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>补给状态</div>
-              <div style={{ fontSize: '24px', marginBottom: '16px' }}>{getStatusTag(supplyStatus.status)}</div>
-              
-              <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
-                <Col xs={12}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
-                      💧 {supplyStatus.waterLevel}%
-                    </div>
-                    <div style={{ fontSize: '12px', opacity: 0.8 }}>水位</div>
-                  </div>
-                </Col>
-                <Col xs={12}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
-                      🔋 {supplyStatus.batteryLevel}%
-                    </div>
-                    <div style={{ fontSize: '12px', opacity: 0.8 }}>电量</div>
-                  </div>
-                </Col>
-              </Row>
-              
-              <div style={{ display: 'flex', justifyContent: 'space-around' }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '12px', opacity: 0.8 }}>充电功能</div>
-                  <Tag color={supplyStatus.chargingEnabled ? 'success' : 'default'}>
-                    {supplyStatus.chargingEnabled ? '已启用' : '未启用'}
-                  </Tag>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '12px', opacity: 0.8 }}>注水功能</div>
-                  <Tag color={supplyStatus.wateringEnabled ? 'success' : 'default'}>
-                    {supplyStatus.wateringEnabled ? '已启用' : '未启用'}
-                  </Tag>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </Col>
-
         <Col xs={24}>
           <Card 
             title="🎛️ 补给控制中心" 
@@ -918,41 +862,6 @@ const SupplyManagement: React.FC = () => {
                     </Col>
                   </Row>
                 </Card>
-              </Col>
-            </Row>
-          </Card>
-        </Col>
-
-        <Col xs={24}>
-          <Card 
-            title="💡 使用说明" 
-            style={{ 
-              borderRadius: '12px', 
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-              background: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)'
-            }}
-          >
-            <Row gutter={[16, 16]}>
-              <Col xs={24} md={8}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', marginBottom: '8px' }}>🎯</div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold' }}>智能补给</div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>系统自动检测并触发补给流程</div>
-                </div>
-              </Col>
-              <Col xs={24} md={8}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', marginBottom: '8px' }}>🤖</div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold' }}>自动导航</div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>自动导航到补给站并精确对齐</div>
-                </div>
-              </Col>
-              <Col xs={24} md={8}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', marginBottom: '8px' }}>⚙️</div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold' }}>灵活控制</div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>支持手动控制充电和注水功能</div>
-                </div>
               </Col>
             </Row>
           </Card>

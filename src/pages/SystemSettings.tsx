@@ -36,9 +36,6 @@ const SystemSettings: React.FC = () => {
       message.error('加载配置失败');
       form.setFieldsValue({
         hostname: 'KWS-R2',
-        bracket_min_height: 1.8,
-        bracket_max_height: 2.8,
-        bracket_default_height: 1.8,
         max_linear_speed: 0.35,
         max_angular_speed: 1.2,
         low_water_threshold: 10,
@@ -95,9 +92,6 @@ const SystemSettings: React.FC = () => {
   const getCategoryByKey = (key: string): string => {
     const categoryMap: { [key: string]: string } = {
       hostname: 'system',
-      bracket_min_height: 'bracket',
-      bracket_max_height: 'bracket',
-      bracket_default_height: 'bracket',
       max_linear_speed: 'motion',
       max_angular_speed: 'motion',
       low_water_threshold: 'threshold',
@@ -140,32 +134,6 @@ const SystemSettings: React.FC = () => {
             rules={[{ required: true, message: '请输入主机名' }]}
           >
             <Input placeholder="KWS-R2" />
-          </Form.Item>
-
-          <Divider>支架参数</Divider>
-
-          <Form.Item
-            name="bracket_min_height"
-            label="支架最小高度 (米)"
-            rules={[{ required: true }]}
-          >
-            <InputNumber min={0.5} max={3.0} step={0.1} style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item
-            name="bracket_max_height"
-            label="支架最大高度 (米)"
-            rules={[{ required: true }]}
-          >
-            <InputNumber min={0.5} max={3.0} step={0.1} style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item
-            name="bracket_default_height"
-            label="支架默认高度 (米)"
-            rules={[{ required: true }]}
-          >
-            <InputNumber min={0.5} max={3.0} step={0.1} style={{ width: '100%' }} />
           </Form.Item>
 
           <Divider>运动控制参数</Divider>
