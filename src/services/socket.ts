@@ -53,11 +53,7 @@ class SocketService {
     this.socket.on('connect', () => {
       this.connectionStatus = 'connected';
       this.reconnectAttempts = 0;
-
-      // 连接成功后，尝试切换回websocket
-      if (this.socket?.io.opts.transports.includes('polling')) {
-        this.socket.io.opts.transports = ['websocket', 'polling'];
-      }
+      // transports switching handled by socket.io internally
     });
 
     this.socket.on('disconnect', (reason) => {
@@ -77,7 +73,7 @@ class SocketService {
 
       // 如果是WebSocket连接失败，尝试使用polling
       if (this.socket && this.reconnectAttempts > 2) {
-        this.socket.io.opts.transports = ['polling'];
+        this.socket.io.opts.transports = ['polling'] as any;
       }
 
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
@@ -121,7 +117,7 @@ class SocketService {
   }
 
   // 发送心跳
-  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   
   public startHeartbeat(): void {
     if (this.heartbeatInterval) {

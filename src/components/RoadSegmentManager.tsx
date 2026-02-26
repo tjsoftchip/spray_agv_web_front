@@ -106,6 +106,8 @@ const RoadSegmentManager: React.FC<RoadSegmentManagerProps> = ({
     }
   };
 
+  // Helper function - kept for potential future use
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getNavPointName = (id: string) => {
     const point = navigationPoints.find((p) => p.id === id);
     return point ? point.name : id;
@@ -115,7 +117,7 @@ const RoadSegmentManager: React.FC<RoadSegmentManagerProps> = ({
     {
       title: '路段',
       key: 'segment',
-      render: (_: any, record: any, index: number) => `路段 ${index + 1}`,
+      render: (_: any, _record: any, index: number) => `路段 ${index + 1}`,
     },
     {
       title: '起点',

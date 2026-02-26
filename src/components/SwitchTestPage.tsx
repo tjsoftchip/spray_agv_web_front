@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Card, Switch, Button, Space, Divider } from 'antd';
+import { Card, Switch, Space, Divider } from 'antd';
 
 const SwitchTestPage: React.FC = () => {
   const [switch1, setSwitch1] = useState(false);

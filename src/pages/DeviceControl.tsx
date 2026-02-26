@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Row, Col, Switch, Button, Space, message, Tag, InputNumber } from 'antd';
+import { Card, Row, Col, Switch, Button, Space, message, InputNumber } from 'antd';
 import { Joystick } from 'react-joystick-component';
 import { socketService } from '../services/socket';
-import { useOrientation } from '../hooks/useOrientation';
 
 const DeviceControl: React.FC = () => {
-  const orientation = useOrientation();
   const [pumpStatus, setPumpStatus] = useState(false);
   const [leftArmStatus, setLeftArmStatus] = useState('close');
   const [rightArmStatus, setRightArmStatus] = useState('close');
@@ -14,10 +12,11 @@ const DeviceControl: React.FC = () => {
   const [armHeight, setArmHeight] = useState(1.0);
   const [armHeightStatus, setArmHeightStatus] = useState(false); // 支架高度状态：false=落, true=起
   const [limitSwitchState, setLimitSwitchState] = useState(0); // 限位开关状态：0=都未触发, 1=上限触发, 2=下限触发, 3=都触发
-  const [controlMode, setControlMode] = useState<'auto' | 'manual'>('auto');
+  // Reserved for future mode switching feature
+  // const [controlMode, setControlMode] = useState<'auto' | 'manual'>('auto');
   const [velocity, setVelocity] = useState({ linear: 0, angular: 0 });
   const [isMoving, setIsMoving] = useState(false);
-  const velocityIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const velocityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [maxSpeed, setMaxSpeed] = useState(1.0); // 默认最大速度1.0m/s
   const [isJoystickActive, setIsJoystickActive] = useState(true); // 手柄激活状态
   const [isFullControlMode, setIsFullControlMode] = useState(false); // 完全接管模式状态
@@ -151,8 +150,10 @@ const DeviceControl: React.FC = () => {
     message.success('紧急停止已复位 - 控制权已恢复');
   };
 
+  // Reserved for future mode switching feature
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleModeSwitch = (mode: 'auto' | 'manual') => {
-    setControlMode(mode);
+    // setControlMode(mode);
     if (mode === 'manual') {
       message.info('已切换到手动控制模式');
     } else {
@@ -257,7 +258,8 @@ const DeviceControl: React.FC = () => {
     }, 100);
   };
 
-  // 切换手柄激活状态
+  // Reserved for future joystick activation toggle
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const toggleJoystickActive = () => {
     setIsJoystickActive(!isJoystickActive);
     if (isJoystickActive) {
@@ -321,11 +323,6 @@ const DeviceControl: React.FC = () => {
                   move={handleJoystickMove}
                   stop={handleJoystickStop}
                   throttle={50}
-                  options={{
-                    mode: 'static',
-                    position: { x: '50%', y: '50%' },
-                    color: '#667eea'
-                  }}
                 />
                 <div style={{ 
                   marginTop: 24, 

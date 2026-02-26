@@ -18,6 +18,7 @@ interface RoadSegment {
 interface MapViewerProps {
   navigationPoints: NavigationPoint[];
   roadSegments?: RoadSegment[];
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onMapClick?: (position: { x: number; y: number }) => void;
   robotPosition?: { x: number; y: number };
   center?: [number, number];

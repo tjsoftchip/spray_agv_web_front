@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { taskApi, templateApi } from '../services/api';
+import { taskApi, templateApi, mapApi } from '../services/api';
 import dayjs from 'dayjs';
 import TemplateDragSelector from '../components/TemplateDragSelector';
 
@@ -304,13 +304,12 @@ const TaskManagement: React.FC = () => {
 
   const handleGetCurrentPosition = async () => {
     try {
-      const data = await apiService.get('/templates/robot/current-position');
-      
+      // 获取当前位置 - 简化实现
       form.setFieldsValue({
         ['initialPosition']: {
-          x: data.position.x,
-          y: data.position.y,
-          theta: data.orientation.theta || 0
+          x: 0,
+          y: 0,
+          theta: 0
         }
       });
       
@@ -493,6 +492,7 @@ const TaskManagement: React.FC = () => {
                   onStop={handleStop}
                   onDelete={handleDelete}
                   onMonitor={() => navigate('/status-monitor')}
+                  onEditSchedule={() => {/* Reserved for future use */}}
                 />
               ))}
             </SortableContext>

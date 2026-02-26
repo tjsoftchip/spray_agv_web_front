@@ -12,7 +12,8 @@ const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const TemplateManagement = lazy(() => import('./pages/TemplateManagement'));
 const TaskManagement = lazy(() => import('./pages/TaskManagement'));
-const TaskQueue = lazy(() => import('./pages/TaskQueue'));
+// TaskQueue - reserved for future use
+// const TaskQueue = lazy(() => import('./pages/TaskQueue'));
 const DeviceControl = lazy(() => import('./pages/DeviceControl'));
 const SupplyManagement = lazy(() => import('./pages/SupplyManagement'));
 const MapManagement = lazy(() => import('./pages/MapManagement'));

@@ -11,7 +11,6 @@ import {
   SettingOutlined,
   UserOutlined,
   LogoutOutlined,
-  ClockCircleOutlined,
   MonitorOutlined,
   ExclamationCircleOutlined,
   ReloadOutlined,
