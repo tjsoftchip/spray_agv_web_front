@@ -9,19 +9,16 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Loading from './components/Loading';
 
 const Login = lazy(() => import('./pages/Login'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
 const TemplateManagement = lazy(() => import('./pages/TemplateManagement'));
 const TaskManagement = lazy(() => import('./pages/TaskManagement'));
-// TaskQueue - reserved for future use
-// const TaskQueue = lazy(() => import('./pages/TaskQueue'));
 const DeviceControl = lazy(() => import('./pages/DeviceControl'));
 const SupplyManagement = lazy(() => import('./pages/SupplyManagement'));
 const MapManagement = lazy(() => import('./pages/MapManagement'));
-const PathAutoGenerator = lazy(() => import('./pages/PathAutoGenerator'));
 const SystemSettings = lazy(() => import('./pages/SystemSettings'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
 const StatusMonitor = lazy(() => import('./pages/StatusMonitor'));
 const SystemMonitor = lazy(() => import('./pages/SystemMonitor'));
+const GPSMapping = lazy(() => import('./pages/GPSMapping'));
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const token = localStorage.getItem('token');
@@ -43,14 +40,14 @@ const App: React.FC = () => {
                     <ProtectedRoute>
                       <MainLayout>
                         <Routes>
-                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/" element={<Navigate to="/monitor" replace />} />
                         <Route path="/templates" element={<TemplateManagement />} />
                         <Route path="/tasks" element={<TaskManagement />} />
                         <Route path="/monitor" element={<StatusMonitor />} />
                         <Route path="/status" element={<StatusMonitor />} />
                         <Route path="/status-monitor" element={<StatusMonitor />} />
                         <Route path="/maps" element={<MapManagement />} />
-                        <Route path="/path-generator" element={<PathAutoGenerator />} />
+                        <Route path="/gps-mapping" element={<GPSMapping />} />
                         <Route path="/control" element={<DeviceControl />} />
                         <Route path="/supply" element={<SupplyManagement />} />
                         <Route path="/settings" element={<SystemSettings />} />

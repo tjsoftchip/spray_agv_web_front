@@ -36,11 +36,8 @@ const SystemSettings: React.FC = () => {
       message.error('加载配置失败');
       form.setFieldsValue({
         hostname: 'KWS-R2',
-        max_linear_speed: 0.35,
-        max_angular_speed: 1.2,
         low_water_threshold: 10,
         low_battery_threshold: 10,
-        navigation_max_speed: 0.5,
         navigation_obstacle_avoidance: true,
         navigation_planning_timeout: 30,
         mapping_resolution: 0.05,
@@ -92,11 +89,8 @@ const SystemSettings: React.FC = () => {
   const getCategoryByKey = (key: string): string => {
     const categoryMap: { [key: string]: string } = {
       hostname: 'system',
-      max_linear_speed: 'motion',
-      max_angular_speed: 'motion',
       low_water_threshold: 'threshold',
       low_battery_threshold: 'threshold',
-      navigation_max_speed: 'navigation',
       navigation_obstacle_avoidance: 'navigation',
       navigation_planning_timeout: 'navigation',
       mapping_resolution: 'mapping',
@@ -134,24 +128,6 @@ const SystemSettings: React.FC = () => {
             rules={[{ required: true, message: '请输入主机名' }]}
           >
             <Input placeholder="KWS-R2" />
-          </Form.Item>
-
-          <Divider>运动控制参数</Divider>
-
-          <Form.Item
-            name="max_linear_speed"
-            label="最大线速度 (米/秒)"
-            rules={[{ required: true }]}
-          >
-            <InputNumber min={0.1} max={2.0} step={0.05} style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item
-            name="max_angular_speed"
-            label="最大角速度 (弧度/秒)"
-            rules={[{ required: true }]}
-          >
-            <InputNumber min={0.1} max={3.0} step={0.1} style={{ width: '100%' }} />
           </Form.Item>
 
           <Divider>阈值参数</Divider>

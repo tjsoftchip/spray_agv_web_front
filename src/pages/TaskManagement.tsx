@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Button, Space, Modal, Form, Input, Select, InputNumber, message, Tag, Progress, Popconfirm, Empty, Switch, DatePicker, TimePicker, Checkbox } from 'antd';
+import { Card, Button, Space, Modal, Form, Input, Select, InputNumber, message, Tag, Progress, Popconfirm, Empty, Switch, DatePicker, TimePicker, Checkbox, Divider, Row, Col } from 'antd';
 import { PlusOutlined, PlayCircleOutlined, PauseOutlined, StopOutlined, DeleteOutlined, EyeOutlined, DragOutlined, ClockCircleOutlined, EditOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
@@ -8,6 +8,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { taskApi, templateApi, mapApi } from '../services/api';
 import dayjs from 'dayjs';
 import TemplateDragSelector from '../components/TemplateDragSelector';
+import BeamPositionSelector from '../components/BeamPositionSelector';
+import JobRoutePlanner from '../components/JobRoutePlanner';
 
 const { TextArea } = Input;
 
@@ -188,6 +190,10 @@ const TaskManagement: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [queueStatus, setQueueStatus] = useState<'idle' | 'running' | 'paused'>('idle');
   const [form] = Form.useForm();
+  
+  // 梁位选择和路线规划状态
+  const [selectedBeamPositions, setSelectedBeamPositions] = useState<any[]>([]);
+  const [jobRoute, setJobRoute] = useState<any>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -299,23 +305,6 @@ const TaskManagement: React.FC = () => {
       loadTasks();
     } catch (error: any) {
       message.error('删除失败');
-    }
-  };
-
-  const handleGetCurrentPosition = async () => {
-    try {
-      // 获取当前位置 - 简化实现
-      form.setFieldsValue({
-        ['initialPosition']: {
-          x: 0,
-          y: 0,
-          theta: 0
-        }
-      });
-      
-      message.success('已获取当前机器人位置');
-    } catch (error) {
-      message.error('获取当前位置失败');
     }
   };
 
@@ -533,11 +522,52 @@ const TaskManagement: React.FC = () => {
             </Select>
           </Form.Item>
 
+          <Divider>梁场作业配置</Divider>
+          
+          <Form.Item
+            label="选择梁位"
+            extra="选择需要喷淋作业的梁位，系统将自动生成最优路线"
+          >
+            <BeamPositionSelector 
+              mode="multiple" 
+              maxSelect={20}
+              onPositionsChange={(positions) => {
+                setSelectedBeamPositions(positions);
+                // 当梁位变化时，重置路线
+                setJobRoute(null);
+              }}
+            />
+          </Form.Item>
+
+          {selectedBeamPositions.length > 0 && (
+            <Form.Item
+              label="作业路线规划"
+            >
+              <JobRoutePlanner 
+                beamPositions={selectedBeamPositions}
+                onChange={(route) => {
+                  setJobRoute(route);
+                }}
+              />
+            </Form.Item>
+          )}
+
+          {selectedBeamPositions.length > 0 && jobRoute && (
+            <Card size="small" style={{ marginBottom: 16, background: '#fafafa' }}>
+              <Space>
+                <span>路线总长度: <strong>{jobRoute.totalDistance?.toFixed(1) || 0}m</strong></span>
+                <span>预计时间: <strong>{jobRoute.estimatedTime || 0}分钟</strong></span>
+                <span>梁位数量: <strong>{selectedBeamPositions.length}个</strong></span>
+              </Space>
+            </Card>
+          )}
+
+          <Divider>操作模板（可选）</Divider>
+
           <Form.Item
             name="templateIds"
             label="操作模板"
-            rules={[{ required: true, message: '请选择操作模板' }]}
-            extra="拖拽可调整执行顺序"
+            extra="拖拽可调整执行顺序，或使用上方梁位选择功能"
           >
             <TemplateDragSelector templates={templates} />
           </Form.Item>
@@ -615,86 +645,6 @@ const TaskManagement: React.FC = () => {
                 </Form.Item>
               ) : null;
             }}
-          </Form.Item>
-
-          <Form.Item label="初始位置设置">
-            <Space vertical style={{ width: '100%' }}>
-              <Form.Item
-                name={['initialPosition', 'x']}
-                label="X坐标 (米)"
-                initialValue={0}
-              >
-                <InputNumber step={0.1} precision={3} style={{ width: '100%' }} />
-              </Form.Item>
-              <Form.Item
-                name={['initialPosition', 'y']}
-                label="Y坐标 (米)"
-                initialValue={0}
-              >
-                <InputNumber step={0.1} precision={3} style={{ width: '100%' }} />
-              </Form.Item>
-              <Form.Item
-                name={['initialPosition', 'theta']}
-                label="方向角 (弧度)"
-                initialValue={0}
-              >
-                <InputNumber step={0.1} precision={3} style={{ width: '100%' }} />
-              </Form.Item>
-              <Form.Item>
-                <Space>
-                  <Button 
-                    type="dashed"
-                    onClick={handleGetCurrentPosition}
-                  >
-                    使用当前位置
-                  </Button>
-                  <Button 
-                    type="dashed"
-                    onClick={() => form.setFieldsValue({
-                      initialPosition: {
-                        x: 0,
-                        y: 0,
-                        theta: 0
-                      }
-                    })}
-                  >
-                    重置为原点
-                  </Button>
-                  <Button 
-                    type="dashed"
-                    onClick={() => form.setFieldsValue({
-                      initialPosition: {
-                        ...form.getFieldValue('initialPosition'),
-                        theta: 0
-                      }
-                    })}
-                  >
-                    朝向 0°
-                  </Button>
-                  <Button 
-                    type="dashed"
-                    onClick={() => form.setFieldsValue({
-                      initialPosition: {
-                        ...form.getFieldValue('initialPosition'),
-                        theta: Math.PI / 2
-                      }
-                    })}
-                  >
-                    朝向 90°
-                  </Button>
-                </Space>
-              </Form.Item>
-            </Space>
-          </Form.Item>
-
-          <Form.Item label="执行参数">
-            <Form.Item
-              name={['executionParams', 'operationSpeed']}
-              label="作业速度(m/s)"
-              initialValue={0.35}
-            >
-              <InputNumber min={0.1} max={1} step={0.05} style={{ width: '100%' }} />
-            </Form.Item>
           </Form.Item>
         </Form>
       </Modal>

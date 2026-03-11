@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Row, Col, Button, Space, Statistic, Tag, message, Modal, Form, Input, InputNumber, Select, Table, Popconfirm, Switch } from 'antd';
-import { EnvironmentOutlined, PlusOutlined, EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import React, { useState, useEffect } from 'react';
+import { Card, Row, Col, Button, Space, Statistic, Tag, message, Switch } from 'antd';
+import { EnvironmentOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { socketService } from '../services/socket';
-import { supplyStationApi, supplyManagementApi } from '../services/api';
+import { supplyManagementApi } from '../services/api';
 
 const SupplyManagement: React.FC = () => {
   const [supplyStatus, setSupplyStatus] = useState({
@@ -17,14 +17,9 @@ const SupplyManagement: React.FC = () => {
   });
   const [relayStatus, setRelayStatus] = useState<any>(null);
   const [chargingStatus, setChargingStatus] = useState<any>(null);
-  const [stations, setStations] = useState<any[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingStation, setEditingStation] = useState<any>(null);
-  const [availablePoints, setAvailablePoints] = useState<any[]>([]);
   const [gpuMetrics, setGpuMetrics] = useState<any>(null);
   const [systemMetrics, setSystemMetrics] = useState<any>(null);
   const [taskStatus, setTaskStatus] = useState<any>(null);
-  const [form] = Form.useForm();
   const [networkConfig, setNetworkConfig] = useState({
     relay_ip: '192.168.4.1',
     relay_port: 80,
@@ -37,16 +32,11 @@ const SupplyManagement: React.FC = () => {
       const response = await fetch('/api/settings');
       const data = await response.json();
       
-      console.log('Settings API response:', data);
-      
-      // Settings API returns grouped configs by category
-      // Search across all categories to find network config
       let relay_ip = '192.168.4.1';
       let relay_port = 80;
       let charging_ip = '192.168.1.100';
       let charging_port = 502;
 
-      // Search in all categories
       for (const category in data) {
         if (Array.isArray(data[category])) {
           const foundRelayIp = data[category].find((item: any) => item.key === 'relay_ip');
@@ -61,15 +51,7 @@ const SupplyManagement: React.FC = () => {
         }
       }
 
-      const config = {
-        relay_ip,
-        relay_port,
-        charging_ip,
-        charging_port
-      };
-      
-      console.log('Loaded network config:', config);
-      setNetworkConfig(config);
+      setNetworkConfig({ relay_ip, relay_port, charging_ip, charging_port });
     } catch (error) {
       console.error('加载网络配置失败:', error);
     }
@@ -81,7 +63,6 @@ const SupplyManagement: React.FC = () => {
       setRelayStatus(data);
     } catch (error: any) {
       console.error('加载补水站状态失败:', error);
-      // 设置为离线状态
       setRelayStatus({
         status: 'error',
         relay: false,
@@ -101,7 +82,6 @@ const SupplyManagement: React.FC = () => {
       setChargingStatus(data);
     } catch (error: any) {
       console.error('加载充电桩状态失败:', error);
-      // 设置为离线状态
       setChargingStatus({
         chargingStatus: 0,
         brushStatus: 0,
@@ -122,11 +102,8 @@ const SupplyManagement: React.FC = () => {
   useEffect(() => {
     socketService.connect();
     
-    // 先加载网络配置，然后加载其他数据
     const initializeData = async () => {
       await loadNetworkConfig();
-      loadStations();
-      loadAvailablePoints();
       loadGPUMetrics();
       loadSystemMetrics();
       loadTaskStatus();
@@ -134,12 +111,10 @@ const SupplyManagement: React.FC = () => {
     
     initializeData();
 
-    // 定期刷新数据 - 降低频率以减少错误日志
     const interval = setInterval(() => {
       loadGPUMetrics();
       loadSystemMetrics();
       loadTaskStatus();
-      // 只在设备在线时才频繁查询状态，否则降低频率
       if (relayStatus?.connected) {
         loadRelayStatus();
       }
@@ -148,7 +123,6 @@ const SupplyManagement: React.FC = () => {
       }
     }, 15000);
 
-    // 离线设备的低频轮询
     const offlineInterval = setInterval(() => {
       if (!relayStatus?.connected) {
         loadRelayStatus();
@@ -162,11 +136,9 @@ const SupplyManagement: React.FC = () => {
       if (data.topic === '/supply_status') {
         const status = JSON.parse(data.msg.data);
         setSupplyStatus(prev => {
-          // 自动补给逻辑
           if (prev.autoSupplyEnabled && prev.status === 'idle') {
             const needSupply = status.waterLevel < prev.waterThreshold ||
                              status.batteryLevel < prev.batteryThreshold;
-
             if (needSupply) {
               console.log('自动触发补给流程');
               handleStartSupply();
@@ -184,41 +156,13 @@ const SupplyManagement: React.FC = () => {
     };
   }, [relayStatus?.connected, chargingStatus?.connected]);
 
-  // 当网络配置更新后，加载设备状态
   useEffect(() => {
-    // 只在网络配置从默认值更新到实际值时才加载
     const hasValidConfig = networkConfig.relay_ip !== '192.168.4.1' && networkConfig.charging_ip !== '192.168.1.100';
-    
     if (hasValidConfig && (!relayStatus || relayStatus.ip !== networkConfig.relay_ip || chargingStatus?.ipAddress !== networkConfig.charging_ip)) {
-      console.log('Network config updated, loading device status...');
       loadRelayStatus();
       loadChargingStatus();
     }
   }, [networkConfig.relay_ip, networkConfig.charging_ip, relayStatus?.ip, chargingStatus?.ipAddress]);
-
-  const loadStations = async () => {
-    try {
-      const data = await supplyStationApi.getStations();
-      setStations(data);
-    } catch (error: any) {
-      message.error('加载补给站列表失败');
-    }
-  };
-
-  const loadAvailablePoints = async () => {
-    try {
-      // 模拟从模板或地图获取可用点
-      const mockPoints = [
-        { id: 'point1', name: '预设点1', x: 0, y: 0 },
-        { id: 'point2', name: '预设点2', x: 5, y: 0 },
-        { id: 'point3', name: '预设点3', x: 0, y: 5 },
-        { id: 'point4', name: '预设点4', x: 5, y: 5 },
-      ];
-      setAvailablePoints(mockPoints);
-    } catch (error: any) {
-      message.error('加载可用点位失败');
-    }
-  };
 
   const loadGPUMetrics = async () => {
     try {
@@ -244,39 +188,6 @@ const SupplyManagement: React.FC = () => {
       setTaskStatus(data);
     } catch (error: any) {
       console.error('加载任务状态失败:', error);
-    }
-  };
-
-  const handleGetCurrentPosition = async () => {
-    try {
-      // 模拟从ROS获取当前位置
-      const currentPosition = {
-        x: 2.5,
-        y: 2.5,
-        z: 0,
-        orientation: { x: 0, y: 0, z: 0, w: 1 }
-      };
-
-      form.setFieldsValue({
-        x: currentPosition.x,
-        y: currentPosition.y,
-        z: currentPosition.z,
-        orientation: currentPosition.orientation
-      });
-      
-      message.success('已获取当前位置');
-    } catch (error: any) {
-      message.error('获取当前位置失败');
-    }
-  };
-
-  const handleSelectPoint = (pointId: string) => {
-    const point = availablePoints.find(p => p.id === pointId);
-    if (point) {
-      form.setFieldsValue({
-        position: { x: point.x, y: point.y, z: 0 }
-      });
-      message.success(`已选择点位: ${point.name}`);
     }
   };
 
@@ -467,109 +378,6 @@ const SupplyManagement: React.FC = () => {
     return <Tag color={config.color}>{config.text}</Tag>;
   };
 
-  
-
-  const handleCreateStation = () => {
-    setEditingStation(null);
-    form.resetFields();
-    form.setFieldsValue({
-      type: 'combined',
-      waterSupplyEnabled: true,
-      chargingEnabled: true,
-      status: 'online',
-    });
-    setModalVisible(true);
-  };
-
-  const handleEditStation = (record: any) => {
-    setEditingStation(record);
-    form.setFieldsValue(record);
-    setModalVisible(true);
-  };
-
-  const handleDeleteStation = async (id: string) => {
-    try {
-      await supplyStationApi.deleteStation(id);
-      message.success('删除成功');
-      loadStations();
-    } catch (error: any) {
-      message.error('删除失败');
-    }
-  };
-
-  const handleSubmitStation = async () => {
-    try {
-      const values = await form.validateFields();
-      if (editingStation) {
-        await supplyStationApi.updateStation(editingStation.id, values);
-        message.success('更新成功');
-      } else {
-        await supplyStationApi.createStation(values);
-        message.success('创建成功');
-      }
-      setModalVisible(false);
-      loadStations();
-    } catch (error: any) {
-      message.error('操作失败');
-    }
-  };
-
-  const stationColumns = [
-    {
-      title: '名称',
-      dataIndex: 'name',
-      key: 'name',
-    },
-    {
-      title: '类型',
-      dataIndex: 'type',
-      key: 'type',
-      render: (type: string) => {
-        const typeMap: any = {
-          water: '注水',
-          charge: '充电',
-          combined: '综合',
-        };
-        return typeMap[type] || type;
-      },
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      render: (status: string) => {
-        const statusMap: any = {
-          online: { color: 'green', text: '在线' },
-          offline: { color: 'red', text: '离线' },
-          maintenance: { color: 'orange', text: '维护中' },
-        };
-        const config = statusMap[status] || { color: 'default', text: status };
-        return <Tag color={config.color}>{config.text}</Tag>;
-      },
-    },
-    {
-      title: '操作',
-      key: 'action',
-      render: (_: any, record: any) => (
-        <Space>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditStation(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="确定删除此补给站吗？"
-            onConfirm={() => handleDeleteStation(record.id)}
-            okText="确定"
-            cancelText="取消"
-          >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ];
-
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
       <Row gutter={[24, 24]}>
@@ -715,18 +523,6 @@ const SupplyManagement: React.FC = () => {
                               {chargingStatus.chargingCurrent}mA
                             </div>
                           </Col>
-                          <Col xs={12}>
-                            <div style={{ fontSize: '12px', color: '#666' }}>充电模式</div>
-                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                              {chargingStatus.chargingMode === 0 ? '手动' : '自动'}
-                            </div>
-                          </Col>
-                          <Col xs={12}>
-                            <div style={{ fontSize: '12px', color: '#666' }}>心跳</div>
-                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                              {chargingStatus.heartbeat}
-                            </div>
-                          </Col>
                         </Row>
                       ) : (
                         <div style={{ textAlign: 'center', color: '#ff4d4f', padding: '8px 0' }}>
@@ -735,11 +531,6 @@ const SupplyManagement: React.FC = () => {
                           <div style={{ fontSize: '12px', color: '#666' }}>
                             IP: {chargingStatus.ipAddress}:{chargingStatus.port}
                           </div>
-                          {chargingStatus.error && (
-                            <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-                              {chargingStatus.error}
-                            </div>
-                          )}
                         </div>
                       )}
                     </div>
@@ -825,11 +616,6 @@ const SupplyManagement: React.FC = () => {
                           <div style={{ fontSize: '12px', color: '#666' }}>
                             IP: {relayStatus.ip}
                           </div>
-                          {relayStatus.error && (
-                            <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-                              {relayStatus.error}
-                            </div>
-                          )}
                         </div>
                       )}
                     </div>
@@ -864,40 +650,6 @@ const SupplyManagement: React.FC = () => {
                 </Card>
               </Col>
             </Row>
-          </Card>
-        </Col>
-
-        <Col xs={24}>
-          <Card 
-            title="🏭 补给站管理" 
-            style={{ 
-              borderRadius: '12px', 
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-              background: 'white'
-            }}
-            extra={
-              <Button 
-                type="primary" 
-                icon={<PlusOutlined />} 
-                onClick={handleCreateStation}
-                style={{ borderRadius: '8px' }}
-              >
-                添加补给站
-              </Button>
-            }
-          >
-            <Table
-              columns={stationColumns}
-              dataSource={stations}
-              rowKey="id"
-              pagination={false}
-              size="middle"
-              style={{ width: '100%' }}
-              scroll={{ x: 'max-content' }}
-              rowClassName={(record, index) => 
-                index % 2 === 0 ? 'table-row-light' : 'table-row-dark'
-              }
-            />
           </Card>
         </Col>
       </Row>
@@ -991,151 +743,6 @@ const SupplyManagement: React.FC = () => {
           </Card>
         </Col>
       </Row>
-
-      <Modal
-        title={
-          <div style={{ fontSize: '18px', fontWeight: 'bold' }}>
-            {editingStation ? '✏️ 编辑补给站' : '➕ 添加补给站'}
-          </div>
-        }
-        open={modalVisible}
-        onOk={handleSubmitStation}
-        onCancel={() => setModalVisible(false)}
-        width={800}
-        style={{ borderRadius: '12px' }}
-      >
-        <Form form={form} layout="vertical">
-          <Row gutter={[16, 16]}>
-            <Col xs={24} md={12}>
-              <Form.Item
-                name="name"
-                label="🏷️ 补给站名称"
-                rules={[{ required: true, message: '请输入名称' }]}
-              >
-                <Input placeholder="例如: 主补给站" style={{ borderRadius: '8px' }} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12}>
-              <Form.Item
-                name="type"
-                label="🔧 补给站类型"
-                rules={[{ required: true, message: '请选择类型' }]}
-              >
-                <Select style={{ borderRadius: '8px' }}>
-                  <Select.Option value="water">💧 仅注水</Select.Option>
-                  <Select.Option value="charge">⚡ 仅充电</Select.Option>
-                  <Select.Option value="combined">🔄 综合补给</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Form.Item name="description" label="📝 描述信息">
-            <Input.TextArea rows={2} placeholder="补给站描述信息" style={{ borderRadius: '8px' }} />
-          </Form.Item>
-
-          <Form.Item label="📍 位置设置">
-            <div style={{ background: '#f5f5f5', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
-              <Space vertical style={{ width: '100%' }}>
-                <div>
-                  <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 'bold' }}>🗺️ 选择预设点位</div>
-                  <Select
-                    placeholder="选择预设点位"
-                    style={{ width: '100%', marginBottom: '8px' }}
-                    onChange={handleSelectPoint}
-                    allowClear
-                  >
-                    {availablePoints.map(point => (
-                      <Select.Option key={point.id} value={point.id}>
-                        {point.name} ({point.x}, {point.y})
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </div>
-                
-                <div>
-                  <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 'bold' }}>🎯 获取当前位置</div>
-                  <Button 
-                    type="dashed" 
-                    onClick={handleGetCurrentPosition}
-                    style={{ width: '100%', marginBottom: '8px' }}
-                  >
-                    📍 使用当前位置
-                  </Button>
-                </div>
-              </Space>
-            </div>
-            
-            <Row gutter={[8, 8]}>
-              <Col xs={8}>
-                <Form.Item name={['position', 'x']} label="X坐标" rules={[{ required: true, message: '请输入X坐标' }]}>
-                  <InputNumber placeholder="0.0" step={0.1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col xs={8}>
-                <Form.Item name={['position', 'y']} label="Y坐标" rules={[{ required: true, message: '请输入Y坐标' }]}>
-                  <InputNumber placeholder="0.0" step={0.1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col xs={8}>
-                <Form.Item name={['position', 'z']} label="Z坐标" rules={[{ required: true, message: '请输入Z坐标' }]}>
-                  <InputNumber placeholder="0.0" step={0.1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Form.Item>
-
-          <Form.Item label="🧭 朝向设置">
-            <Row gutter={[8, 8]}>
-              <Col xs={6}>
-                <Form.Item name={['orientation', 'x']} label="X">
-                  <InputNumber placeholder="0.0" step={0.1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col xs={6}>
-                <Form.Item name={['orientation', 'y']} label="Y">
-                  <InputNumber placeholder="0.0" step={0.1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col xs={6}>
-                <Form.Item name={['orientation', 'z']} label="Z">
-                  <InputNumber placeholder="0.0" step={0.1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col xs={6}>
-                <Form.Item name={['orientation', 'w']} label="W">
-                  <InputNumber placeholder="1.0" step={0.1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Form.Item>
-
-          <Row gutter={[16, 16]}>
-            <Col xs={24} md={12}>
-              <Form.Item name="ipAddress" label="🌐 IP地址">
-                <Input placeholder="例如: 192.168.1.100" style={{ borderRadius: '8px' }} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12}>
-              <Form.Item name="port" label="🔌 端口" initialValue={80}>
-                <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Form.Item
-            name="status"
-            label="📊 运行状态"
-            rules={[{ required: true, message: '请选择状态' }]}
-          >
-            <Select style={{ borderRadius: '8px' }}>
-              <Select.Option value="online">🟢 在线</Select.Option>
-              <Select.Option value="offline">🔴 离线</Select.Option>
-              <Select.Option value="maintenance">🟡 维护中</Select.Option>
-            </Select>
-          </Form.Item>
-        </Form>
-      </Modal>
     </div>
   );
 };

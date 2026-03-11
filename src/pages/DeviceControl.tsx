@@ -17,7 +17,9 @@ const DeviceControl: React.FC = () => {
   const [velocity, setVelocity] = useState({ linear: 0, angular: 0 });
   const [isMoving, setIsMoving] = useState(false);
   const velocityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [maxSpeed, setMaxSpeed] = useState(1.0); // 默认最大速度1.0m/s
+  const currentVelocityRef = useRef({ linear: 0, angular: 0 }); // 存储当前速度，供定时器使用
+  const [maxSpeed, setMaxSpeed] = useState(0.2); // 默认最大速度0.2m/s
+  const maxAngularSpeed = 1.0; // 最大角速度固定为1.0 rad/s，确保转弯灵活
   const [isJoystickActive, setIsJoystickActive] = useState(true); // 手柄激活状态
   const [isFullControlMode, setIsFullControlMode] = useState(false); // 完全接管模式状态
 
@@ -168,6 +170,9 @@ const DeviceControl: React.FC = () => {
       clearInterval(velocityIntervalRef.current);
     }
     
+    // 更新当前速度引用
+    currentVelocityRef.current = { linear, angular };
+    
     setIsMoving(true);
     
     // 立即发送一次
@@ -180,9 +185,14 @@ const DeviceControl: React.FC = () => {
     publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
     
     // 定时发送速度指令，确保持续控制
+    // 使用currentVelocityRef获取最新速度，实现实时更新
     velocityIntervalRef.current = setInterval(() => {
-      console.log('Continuously sending twist message:', twistMessage);
-      publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
+      const currentVel = currentVelocityRef.current;
+      const currentTwistMessage = {
+        linear: { x: currentVel.linear, y: 0.0, z: 0.0 },
+        angular: { x: 0.0, y: 0.0, z: currentVel.angular }
+      };
+      publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', currentTwistMessage);
     }, 100); // 每100ms发送一次
   };
 
@@ -206,29 +216,72 @@ const DeviceControl: React.FC = () => {
   };
 
   const handleJoystickMove = (event: any) => {
-    // 使用设定的最大速度值
-    const maxLinear = maxSpeed;  // 线速度最大值
-    const maxAngular = maxSpeed; // 角速度最大值
+    // 线速度使用设定的最大速度值，角速度使用固定值确保转弯灵活
+    const maxLinear = maxSpeed;  // 线速度最大值 (默认0.2m/s)
+    const maxAngular = maxAngularSpeed; // 角速度最大值固定为1.0 rad/s
     
     // react-joystick-component 返回的值范围是 -1 到 1
-    const joystickX = event.x || 0;
-    const joystickY = event.y || 0;
+    // 注意：摇杆是圆形区域，所以 x² + y² ≤ 1，斜向时x和y都会被限制
+    const rawX = event.x || 0;
+    const rawY = event.y || 0;
     
-    // 直接使用摇杆值乘以最大速度
-    const linear = joystickY * maxLinear;
-    const angular = -joystickX * maxAngular;
+    // 方案C：方形区域映射（独立轴控制）
+    // 
+    // 问题：圆形摇杆在斜向时，x和y都会被限制（x²+y²≤1）
+    // 例如：右上角 -> x≈0.707, y≈0.707（不是1）
+    // 
+    // 解决：将圆形区域映射到方形区域
+    // - 使用 max(|x|, |y|) 作为归一化因子
+    // - 让主导轴达到±1，另一个轴按比例放大
+    // - 这样斜向推摇杆时，两个轴都可以达到最大值
+    // 
+    // 结果：
+    // - 正前方(0, 1) -> 线速度=maxSpeed, 角速度=0
+    // - 右上角(0.7, 0.7) -> 归一化后(1, 1) -> 线速度=maxSpeed, 角速度=maxAngular
+    // - 正右方(1, 0) -> 线速度=0, 角速度=maxAngular
     
-    console.log('Joystick move:', { x: joystickX, y: joystickY, linear, angular });
+    const distance = Math.sqrt(rawX * rawX + rawY * rawY);
+    
+    let normalizedX = rawX;
+    let normalizedY = rawY;
+    
+    if (distance > 0.1) {
+      // 方形映射：将圆形坐标归一化到方形边界
+      const maxComponent = Math.max(Math.abs(rawX), Math.abs(rawY));
+      normalizedX = rawX / maxComponent;
+      normalizedY = rawY / maxComponent;
+      // 注意：这里不再乘以distance，让每个轴都可以独立达到±1
+    }
+    
+    // 计算最终速度 - 线速度和角速度完全独立
+    const linear = normalizedY * maxLinear;
+    const angular = -normalizedX * maxAngular;
+    
+    console.log('Joystick move:', { 
+      raw: { x: rawX, y: rawY },
+      normalized: { x: normalizedX, y: normalizedY },
+      distance: distance.toFixed(2),
+      linear: linear.toFixed(3), 
+      angular: angular.toFixed(3),
+      mode: '方形映射(方案C)' 
+    });
     
     setVelocity({ linear, angular });
     
     // 如果摇杆回到中心位置（接近0），则停止
-    if (Math.abs(joystickX) < 0.1 && Math.abs(joystickY) < 0.1) {
+    // 使用原始值判断，因为归一化后可能被放大
+    if (distance < 0.1) {
       console.log('Joystick returned to center, stopping');
       handleJoystickStop();
     } else {
-      // 开始持续发送速度命令
-      startVelocityPublishing(linear, angular);
+      // 更新当前速度引用，这样定时器中可以使用最新值
+      currentVelocityRef.current = { linear, angular };
+      
+      // 只有在未移动状态时才启动定时器，避免频繁重启造成卡顿
+      if (!isMoving) {
+        startVelocityPublishing(linear, angular);
+      }
+      // 如果已经在移动，速度会通过currentVelocityRef在定时器中自动更新
     }
   };
 
@@ -481,12 +534,12 @@ const DeviceControl: React.FC = () => {
                     fontWeight: 600,
                     color: '#495057'
                   }}>
-                    ⚡ 最大移动速度 (m/s)
+                    ⚡ 最大移动速度 (m/s) - 限制最高0.5m/s
                   </label>
                   <InputNumber
                     min={0.1}
-                    max={3.0}
-                    step={0.1}
+                    max={0.5}
+                    step={0.05}
                     value={maxSpeed}
                     onChange={(value) => {
                       if (value) {

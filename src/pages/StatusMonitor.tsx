@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Card, Row, Col, Progress, Tag, Button, Space, Switch } from 'antd';
+import { Card, Row, Col, Progress, Tag, Button, Space, Switch, Badge, Tooltip } from 'antd';
 import { 
   PlayCircleOutlined, 
   PauseOutlined, 
   StopOutlined,
-  EyeOutlined
+  EyeOutlined,
+  CompassOutlined,
+  GlobalOutlined
 } from '@ant-design/icons';
 import MapViewer from '../components/MapViewer';
 import { socketService } from '../services/socket';
@@ -46,6 +48,28 @@ const StatusMonitor: React.FC = () => {
   const [useWebVideoServer, setUseWebVideoServer] = useState(true); // 使用 web_video_server
   const [controlLoading, setControlLoading] = useState(false);
   const [mapCenter] = useState<[number, number]>([0, 0]);
+  
+  // GPS 状态
+  const [gpsStatus, setGpsStatus] = useState<{
+    quality: number;
+    satellites: number;
+    hdop: number;
+    latitude: number;
+    longitude: number;
+    altitude: number;
+    isFixed: boolean;
+  } | null>(null);
+  
+  // 报警状态 - 数组形式便于显示
+  const [alarms, setAlarms] = useState<Array<{
+    level: 'info' | 'warning' | 'error' | 'critical';
+    type: string;
+    message: string;
+    timestamp: number;
+  }>>([]);
+  
+  // GPS丢失计时器
+  const gpsLostStartTimeRef = useRef<number | null>(null);
   
   const socketConnectedRef = useRef(false);
   const speedHistoryRef = useRef<number[]>([]);
@@ -208,6 +232,137 @@ const StatusMonitor: React.FC = () => {
         const position = data.msg.pose.pose.position;
         setRobotPosition({ x: position.x, y: position.y });
       }
+
+      // 处理GPS数据
+      if (data.topic === '/gps/fix' && data.msg) {
+        const fix = data.msg;
+        setGpsStatus(prev => ({
+          quality: prev?.quality ?? 0,
+          satellites: prev?.satellites ?? 0,
+          hdop: prev?.hdop ?? 99.99,
+          latitude: fix.latitude || 0,
+          longitude: fix.longitude || 0,
+          altitude: fix.altitude || 0,
+          isFixed: fix.status?.status >= 1
+        }));
+      }
+
+      if (data.topic === '/gps/status' && data.msg) {
+        const status = data.msg;
+        setGpsStatus(prev => ({
+          quality: status.fix_type || 0,
+          satellites: status.satellites_used || 0,
+          hdop: status.hdop || 99.99,
+          latitude: prev?.latitude ?? 0,
+          longitude: prev?.longitude ?? 0,
+          altitude: prev?.altitude ?? 0,
+          isFixed: status.fix_type >= 1
+        }));
+        
+        // 检测GPS丢失（quality为0表示无定位）
+        if (status.fix_type === 0) {
+          if (!gpsLostStartTimeRef.current) {
+            gpsLostStartTimeRef.current = Date.now();
+          }
+          const lostDuration = (Date.now() - gpsLostStartTimeRef.current) / 1000;
+          // 超过10秒触发报警
+          if (lostDuration > 10) {
+            setAlarms(prev => {
+              const exists = prev.find(a => a.type === 'gps_lost');
+              if (exists) {
+                return prev.map(a => a.type === 'gps_lost' ? {
+                  ...a,
+                  message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
+                  timestamp: Date.now()
+                } : a);
+              }
+              return [...prev, {
+                level: 'error' as const,
+                type: 'gps_lost',
+                message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
+                timestamp: Date.now()
+              }];
+            });
+          }
+        } else {
+          // GPS恢复，清除报警
+          gpsLostStartTimeRef.current = null;
+          setAlarms(prev => prev.filter(a => a.type !== 'gps_lost'));
+        }
+      }
+      
+      // 处理报警消息
+      if (data.topic === '/alarm' && data.msg) {
+        const alarmMsg = data.msg.data || data.msg;
+        setAlarms(prev => {
+          // 避免重复报警
+          const exists = prev.find(a => a.message === alarmMsg);
+          if (exists) return prev;
+          return [...prev, {
+            level: 'warning' as const,
+            type: 'general',
+            message: alarmMsg,
+            timestamp: Date.now()
+          }];
+        });
+      }
+      
+      // 处理低电量报警
+      if (data.topic === '/battery_low' && data.msg) {
+        const isLow = data.msg.data;
+        if (isLow) {
+          setAlarms(prev => {
+            const exists = prev.find(a => a.type === 'low_battery');
+            if (exists) return prev;
+            return [...prev, {
+              level: 'warning' as const,
+              type: 'low_battery',
+              message: `低电量警告 - 当前电量${batteryLevel ? batteryLevel.toFixed(0) : '?'}%`,
+              timestamp: Date.now()
+            }];
+          });
+        } else {
+          setAlarms(prev => prev.filter(a => a.type !== 'low_battery'));
+        }
+      }
+      
+      // 处理低水位报警
+      if (data.topic === '/water_level_low' && data.msg) {
+        const isLow = data.msg.data;
+        if (isLow) {
+          setAlarms(prev => {
+            const exists = prev.find(a => a.type === 'low_water');
+            if (exists) return prev;
+            return [...prev, {
+              level: 'warning' as const,
+              type: 'low_water',
+              message: `低水位警告 - 当前水位${waterLevel ? waterLevel.toFixed(0) : '?'}%`,
+              timestamp: Date.now()
+            }];
+          });
+        } else {
+          setAlarms(prev => prev.filter(a => a.type !== 'low_water'));
+        }
+      }
+      
+      // 处理障碍等待超时报警
+      if (data.topic === '/obstacle_wait_timeout' && data.msg) {
+        const isTimeout = data.msg.data;
+        if (isTimeout) {
+          setAlarms(prev => {
+            const exists = prev.find(a => a.type === 'obstacle_wait_timeout');
+            if (exists) return prev;
+            return [...prev, {
+              level: 'error' as const,
+              type: 'obstacle_wait_timeout',
+              message: '障碍等待超时 - 请人工处理',
+              timestamp: Date.now()
+            }];
+          });
+        } else {
+          setAlarms(prev => prev.filter(a => a.type !== 'obstacle_wait_timeout'));
+        }
+      }
     };
 
     const handleNavigationStatus = (data: NavigationStatus) => {
@@ -244,7 +399,55 @@ const StatusMonitor: React.FC = () => {
       });
     };
 
+    // 订阅GPS数据
+    const subscribeToGPS = () => {
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/gps/fix',
+        type: 'sensor_msgs/NavSatFix'
+      });
+
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/gps/status',
+        type: 'gps_msgs/GPSStatus'
+      });
+    };
+
+    // 订阅报警相关话题
+    const subscribeToAlarms = () => {
+      // 报警信息
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/alarm',
+        type: 'std_msgs/String'
+      });
+
+      // 低电量报警
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/battery_low',
+        type: 'std_msgs/Bool'
+      });
+
+      // 低水位报警
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/water_level_low',
+        type: 'std_msgs/Bool'
+      });
+
+      // 障碍等待超时
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/obstacle_wait_timeout',
+        type: 'std_msgs/Bool'
+      });
+    };
+
     subscribeToBatteryAndWater();
+    subscribeToGPS();
+    subscribeToAlarms();
 
     // 定时获取电池和水位状态（每10秒）
     const statusInterval = setInterval(async () => {
@@ -290,6 +493,8 @@ const StatusMonitor: React.FC = () => {
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/odom' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/battery_level' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/water_monitor/level' });
+        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/fix' });
+        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/status' });
         
         socketService.disconnect();
         socketConnectedRef.current = false;
@@ -562,6 +767,159 @@ const StatusMonitor: React.FC = () => {
                 <div style={{ marginBottom: '4px' }}>横坐标: {robotPosition ? robotPosition.x.toFixed(2) : '--'}米</div>
                 <div>纵坐标: {robotPosition ? robotPosition.y.toFixed(2) : '--'}米</div>
               </div>
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* GPS状态行 */}
+      <Row gutter={[16, 16]} style={{ marginBottom: '20px' }}>
+        <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                <GlobalOutlined style={{ marginRight: 8 }} />
+                GPS 定位状态
+              </div>
+              {gpsStatus ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                    <Badge 
+                      status={gpsStatus.isFixed ? 'success' : 'error'} 
+                      text={
+                        <span style={{ 
+                          fontSize: '16px', 
+                          fontWeight: 600, 
+                          color: gpsStatus.isFixed ? '#52c41a' : '#ff4d4f' 
+                        }}>
+                          {gpsStatus.isFixed ? '✓ 已定位' : '✗ 未定位'}
+                        </span>
+                      }
+                    />
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                    质量: {gpsStatus.quality === 0 ? '无定位' : 
+                           gpsStatus.quality === 1 ? 'GPS定位' : 
+                           gpsStatus.quality === 2 ? 'DGPS定位' : 
+                           gpsStatus.quality === 4 ? 'RTK固定解' : '未知'}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: '14px', color: '#999' }}>等待GPS数据...</div>
+              )}
+            </div>
+          </Card>
+        </Col>
+        
+        <Col xs={12} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                <CompassOutlined style={{ marginRight: 8 }} />
+                卫星信息
+              </div>
+              {gpsStatus ? (
+                <>
+                  <div style={{ fontSize: '24px', fontWeight: 600, color: '#1890ff', marginBottom: '4px' }}>
+                    {gpsStatus.satellites} 颗
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#999' }}>
+                    HDOP: {gpsStatus.hdop.toFixed(2)} {gpsStatus.hdop < 1 ? '(优)' : gpsStatus.hdop < 2 ? '(良)' : gpsStatus.hdop < 5 ? '(中)' : '(差)'}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: '14px', color: '#999' }}>等待数据...</div>
+              )}
+            </div>
+          </Card>
+        </Col>
+        
+        <Col xs={12} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: 'none'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                📍 GPS坐标
+              </div>
+              {gpsStatus && gpsStatus.latitude !== 0 ? (
+                <Tooltip title={`经度: ${gpsStatus.longitude?.toFixed(6) || '--'}°, 纬度: ${gpsStatus.latitude?.toFixed(6) || '--'}°`}>
+                  <div style={{ fontSize: '12px', color: '#666', fontFamily: 'monospace' }}>
+                    <div>纬度: {gpsStatus.latitude?.toFixed(6) || '--'}°</div>
+                    <div>经度: {gpsStatus.longitude?.toFixed(6) || '--'}°</div>
+                    <div>海拔: {gpsStatus.altitude?.toFixed(1) || '--'} m</div>
+                  </div>
+                </Tooltip>
+              ) : (
+                <div style={{ fontSize: '14px', color: '#999' }}>无有效坐标</div>
+              )}
+            </div>
+          </Card>
+        </Col>
+        
+        {/* 系统报警 */}
+        <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+          <Card 
+            size="small"
+            style={{ 
+              boxShadow: alarms.length > 0 ? '0 2px 8px rgba(255,77,79,0.3)' : '0 2px 8px rgba(0,0,0,0.1)',
+              borderRadius: '8px',
+              height: '100%',
+              border: alarms.length > 0 ? '2px solid #ff4d4f' : 'none',
+              background: alarms.length > 0 ? '#fff2f0' : '#fff'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
+                {alarms.length > 0 ? '⚠️ 系统报警' : '✅ 系统状态'}
+              </div>
+              {alarms.length > 0 ? (
+                <div style={{ maxHeight: 100, overflow: 'auto' }}>
+                  {alarms.map((alarm, index) => (
+                    <div 
+                      key={index}
+                      style={{ 
+                        fontSize: '12px', 
+                        color: alarm.level === 'error' ? '#ff4d4f' : 
+                               alarm.level === 'warning' ? '#fa8c16' : '#1890ff',
+                        marginBottom: '4px',
+                        padding: '2px 6px',
+                        background: alarm.level === 'error' ? '#fff1f0' : 
+                                   alarm.level === 'warning' ? '#fff7e6' : '#e6f7ff',
+                        borderRadius: '4px'
+                      }}
+                    >
+                      {alarm.level === 'error' ? '🔴' : alarm.level === 'warning' ? '🟡' : '🔵'} {alarm.message}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '14px', color: '#52c41a', fontWeight: 500 }}>
+                  ✓ 所有系统正常
+                </div>
+              )}
             </div>
           </Card>
         </Col>
