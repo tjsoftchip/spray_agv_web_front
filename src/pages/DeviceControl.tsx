@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Row, Col, Switch, Button, Space, message, InputNumber } from 'antd';
-import { Joystick } from 'react-joystick-component';
+import { Card, Row, Col, Switch, Button, Space, message, InputNumber, Slider } from 'antd';
 import { socketService } from '../services/socket';
 
 const DeviceControl: React.FC = () => {
@@ -15,11 +14,11 @@ const DeviceControl: React.FC = () => {
   // Reserved for future mode switching feature
   // const [controlMode, setControlMode] = useState<'auto' | 'manual'>('auto');
   const [velocity, setVelocity] = useState({ linear: 0, angular: 0 });
+  const [steerAngle, setSteerAngle] = useState(0); // 转向角度 -34~34 度
   const [isMoving, setIsMoving] = useState(false);
   const velocityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentVelocityRef = useRef({ linear: 0, angular: 0 }); // 存储当前速度，供定时器使用
-  const [maxSpeed, setMaxSpeed] = useState(0.2); // 默认最大速度0.2m/s
-  const maxAngularSpeed = 1.0; // 最大角速度固定为1.0 rad/s，确保转弯灵活
+  const [maxSpeed, setMaxSpeed] = useState(0.2); // 默认最大速度0.2m/s，最大限制0.5m/s
   const [isJoystickActive, setIsJoystickActive] = useState(true); // 手柄激活状态
   const [isFullControlMode, setIsFullControlMode] = useState(false); // 完全接管模式状态
 
@@ -164,151 +163,123 @@ const DeviceControl: React.FC = () => {
     }
   };
 
-  const startVelocityPublishing = (linear: number, angular: number) => {
-    // 清除之前的定时器
-    if (velocityIntervalRef.current) {
-      clearInterval(velocityIntervalRef.current);
-    }
-    
-    // 更新当前速度引用
-    currentVelocityRef.current = { linear, angular };
-    
-    setIsMoving(true);
-    
-    // 立即发送一次
-    const twistMessage = {
+  // 发送速度命令
+  const sendVelocityCommand = (linear: number, angular: number) => {
+    const twistMsg = {
       linear: { x: linear, y: 0.0, z: 0.0 },
       angular: { x: 0.0, y: 0.0, z: angular }
     };
-    console.log('Sending twist message:', twistMessage);
-    // 使用专门的web_cmd_vel话题，避免与手柄控制冲突
-    publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', twistMessage);
+    publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', twistMsg);
+    console.log(`发送速度: linear=${linear.toFixed(2)} m/s, steer=${(angular * 34).toFixed(1)}°`);
+  };
+
+  // 启动定时发送
+  const startVelocityPublishing = () => {
+    if (velocityIntervalRef.current) return;
     
-    // 定时发送速度指令，确保持续控制
-    // 使用currentVelocityRef获取最新速度，实现实时更新
+    setIsMoving(true);
     velocityIntervalRef.current = setInterval(() => {
-      const currentVel = currentVelocityRef.current;
-      const currentTwistMessage = {
-        linear: { x: currentVel.linear, y: 0.0, z: 0.0 },
-        angular: { x: 0.0, y: 0.0, z: currentVel.angular }
-      };
-      publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', currentTwistMessage);
+      const { linear, angular } = currentVelocityRef.current;
+      sendVelocityCommand(linear, angular);
     }, 100); // 每100ms发送一次
   };
 
+  // 停止定时发送
   const stopVelocityPublishing = () => {
-    console.log('Stopping velocity publishing');
-    setIsMoving(false);
-    
-    // 清除定时器
     if (velocityIntervalRef.current) {
       clearInterval(velocityIntervalRef.current);
       velocityIntervalRef.current = null;
     }
+    setIsMoving(false);
+  };
+
+  // 线速度滑块变化处理
+  const handleLinearSpeedChange = (value: number) => {
+    const linear = value;
+    const angular = steerAngle / 34; // 转向角度转换为比例 -1~1
+    
+    setVelocity({ linear, angular });
+    currentVelocityRef.current = { linear, angular };
+    
+    // 如果有速度或转向，启动发送
+    if (linear !== 0 || angular !== 0) {
+      startVelocityPublishing();
+    } else {
+      // 停止
+      stopVelocityPublishing();
+      sendVelocityCommand(0, 0);
+    }
+  };
+
+  // 转向滑块变化处理
+  const handleSteerAngleChange = (value: number) => {
+    setSteerAngle(value);
+    const angular = value / 34; // 转向角度转换为比例 -1~1
+    const linear = velocity.linear;
+    
+    currentVelocityRef.current = { linear, angular };
+    
+    // 如果有速度或转向，启动发送
+    if (linear !== 0 || angular !== 0) {
+      startVelocityPublishing();
+    } else {
+      stopVelocityPublishing();
+      sendVelocityCommand(0, 0);
+    }
+  };
+
+  // 转向滑块松手归零
+  const handleSteerRelease = () => {
+    console.log('转向滑块松手，归零');
+    setSteerAngle(0);
+    const angular = 0;
+    const linear = velocity.linear;
+    
+    currentVelocityRef.current = { linear, angular };
+    
+    // 如果线速度也为0，停止发送
+    if (linear === 0) {
+      stopVelocityPublishing();
+      sendVelocityCommand(0, 0);
+    } else {
+      // 只有线速度，继续发送
+      sendVelocityCommand(linear, 0);
+    }
+  };
+
+  // 线速度滑块松手归零
+  const handleLinearRelease = () => {
+    console.log('线速度滑块松手，归零');
+    setVelocity({ linear: 0, angular: velocity.angular });
+    const linear = 0;
+    const angular = steerAngle / 34;
+    
+    currentVelocityRef.current = { linear, angular };
+    
+    // 如果转向也为0，停止发送
+    if (angular === 0) {
+      stopVelocityPublishing();
+      sendVelocityCommand(0, 0);
+    } else {
+      // 只有转向，继续发送
+      sendVelocityCommand(0, angular);
+    }
+  };
+
+  // 停止按钮处理
+  const handleStopAll = () => {
+    console.log('停止所有运动');
+    setVelocity({ linear: 0, angular: 0 });
+    setSteerAngle(0);
+    currentVelocityRef.current = { linear: 0, angular: 0 };
+    stopVelocityPublishing();
     
     // 发送停止命令
     const stopMessage = {
       linear: { x: 0.0, y: 0.0, z: 0.0 },
       angular: { x: 0.0, y: 0.0, z: 0.0 }
     };
-    console.log('Sending stop message:', stopMessage);
     publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
-  };
-
-  const handleJoystickMove = (event: any) => {
-    // 线速度使用设定的最大速度值，角速度使用固定值确保转弯灵活
-    const maxLinear = maxSpeed;  // 线速度最大值 (默认0.2m/s)
-    const maxAngular = maxAngularSpeed; // 角速度最大值固定为1.0 rad/s
-    
-    // react-joystick-component 返回的值范围是 -1 到 1
-    // 注意：摇杆是圆形区域，所以 x² + y² ≤ 1，斜向时x和y都会被限制
-    const rawX = event.x || 0;
-    const rawY = event.y || 0;
-    
-    // 方案C：方形区域映射（独立轴控制）
-    // 
-    // 问题：圆形摇杆在斜向时，x和y都会被限制（x²+y²≤1）
-    // 例如：右上角 -> x≈0.707, y≈0.707（不是1）
-    // 
-    // 解决：将圆形区域映射到方形区域
-    // - 使用 max(|x|, |y|) 作为归一化因子
-    // - 让主导轴达到±1，另一个轴按比例放大
-    // - 这样斜向推摇杆时，两个轴都可以达到最大值
-    // 
-    // 结果：
-    // - 正前方(0, 1) -> 线速度=maxSpeed, 角速度=0
-    // - 右上角(0.7, 0.7) -> 归一化后(1, 1) -> 线速度=maxSpeed, 角速度=maxAngular
-    // - 正右方(1, 0) -> 线速度=0, 角速度=maxAngular
-    
-    const distance = Math.sqrt(rawX * rawX + rawY * rawY);
-    
-    let normalizedX = rawX;
-    let normalizedY = rawY;
-    
-    if (distance > 0.1) {
-      // 方形映射：将圆形坐标归一化到方形边界
-      const maxComponent = Math.max(Math.abs(rawX), Math.abs(rawY));
-      normalizedX = rawX / maxComponent;
-      normalizedY = rawY / maxComponent;
-      // 注意：这里不再乘以distance，让每个轴都可以独立达到±1
-    }
-    
-    // 计算最终速度 - 线速度和角速度完全独立
-    const linear = normalizedY * maxLinear;
-    const angular = -normalizedX * maxAngular;
-    
-    console.log('Joystick move:', { 
-      raw: { x: rawX, y: rawY },
-      normalized: { x: normalizedX, y: normalizedY },
-      distance: distance.toFixed(2),
-      linear: linear.toFixed(3), 
-      angular: angular.toFixed(3),
-      mode: '方形映射(方案C)' 
-    });
-    
-    setVelocity({ linear, angular });
-    
-    // 如果摇杆回到中心位置（接近0），则停止
-    // 使用原始值判断，因为归一化后可能被放大
-    if (distance < 0.1) {
-      console.log('Joystick returned to center, stopping');
-      handleJoystickStop();
-    } else {
-      // 更新当前速度引用，这样定时器中可以使用最新值
-      currentVelocityRef.current = { linear, angular };
-      
-      // 只有在未移动状态时才启动定时器，避免频繁重启造成卡顿
-      if (!isMoving) {
-        startVelocityPublishing(linear, angular);
-      }
-      // 如果已经在移动，速度会通过currentVelocityRef在定时器中自动更新
-    }
-  };
-
-  const handleJoystickStop = () => {
-    console.log('Joystick stop');
-    setVelocity({ linear: 0, angular: 0 });
-    
-    // 停止发送速度命令
-    stopVelocityPublishing();
-    
-    // 确保停止命令发送成功，发送多次停止命令
-    const stopMessage = {
-      linear: { x: 0.0, y: 0.0, z: 0.0 },
-      angular: { x: 0.0, y: 0.0, z: 0.0 }
-    };
-    
-    // 立即发送一次停止命令
-    publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
-    
-    // 延迟再发送两次，确保停止命令可靠到达
-    setTimeout(() => {
-      publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
-    }, 50);
-    
-    setTimeout(() => {
-      publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
-    }, 100);
   };
 
   // Reserved for future joystick activation toggle
@@ -369,16 +340,119 @@ const DeviceControl: React.FC = () => {
                 background: '#f8f9fa',
                 borderRadius: 8
               }}>
-                <Joystick
-                  size={180}
-                  baseColor="#e9ecef"
-                  stickColor="#667eea"
-                  move={handleJoystickMove}
-                  stop={handleJoystickStop}
-                  throttle={50}
-                />
+                {/* 控制区域布局：左边是转向滑块，右边是线速度滑块 */}
                 <div style={{ 
-                  marginTop: 24, 
+                  display: 'flex', 
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '100%',
+                  height: 280,
+                  gap: 40
+                }}>
+                  
+                  {/* 转向滑块 - 左右方向 */}
+                  <div style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    alignItems: 'center',
+                    flex: 1
+                  }}>
+                    <div style={{ fontWeight: 600, color: '#495057', marginBottom: 8 }}>转向</div>
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center',
+                      width: '100%',
+                      justifyContent: 'space-between'
+                    }}>
+                      <span style={{ fontSize: 12, color: '#17a2b8' }}>左34°</span>
+                      <Slider
+                        min={-34}
+                        max={34}
+                        step={1}
+                        value={steerAngle}
+                        onChange={handleSteerAngleChange}
+                        onAfterChange={() => handleSteerRelease()}
+                        tooltip={{ formatter: (v) => `${v || 0}°` }}
+                        style={{ flex: 1, margin: '0 12px' }}
+                        styles={{
+                          track: { backgroundColor: steerAngle > 0 ? '#fd7e14' : steerAngle < 0 ? '#17a2b8' : '#d9d9d9' },
+                          handle: { borderColor: steerAngle > 0 ? '#fd7e14' : steerAngle < 0 ? '#17a2b8' : '#667eea' }
+                        }}
+                      />
+                      <span style={{ fontSize: 12, color: '#fd7e14' }}>右34°</span>
+                    </div>
+                    <div style={{ 
+                      fontSize: 18, 
+                      fontWeight: 'bold', 
+                      color: steerAngle < 0 ? '#17a2b8' : steerAngle > 0 ? '#fd7e14' : '#6c757d',
+                      marginTop: 8
+                    }}>
+                      {steerAngle < 0 ? '左转 ' : steerAngle > 0 ? '右转 ' : '直行'}
+                      {Math.abs(steerAngle)}°
+                    </div>
+                    <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>松手自动归零</div>
+                  </div>
+
+                  {/* 线速度滑块 - 上下方向 */}
+                  <div style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    alignItems: 'center'
+                  }}>
+                    <div style={{ fontWeight: 600, color: '#495057', marginBottom: 8 }}>速度</div>
+                    <div style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      height: 180
+                    }}>
+                      <span style={{ fontSize: 12, color: '#28a745', marginBottom: 4 }}>前进</span>
+                      <Slider
+                        vertical
+                        min={-maxSpeed}
+                        max={maxSpeed}
+                        step={0.01}
+                        value={velocity.linear}
+                        onChange={handleLinearSpeedChange}
+                        onAfterChange={() => handleLinearRelease()}
+                        tooltip={{ formatter: (v) => `${(v || 0).toFixed(2)} m/s` }}
+                        style={{ height: 140 }}
+                        styles={{
+                          track: { backgroundColor: velocity.linear > 0 ? '#28a745' : velocity.linear < 0 ? '#dc3545' : '#d9d9d9' },
+                          handle: { borderColor: velocity.linear > 0 ? '#28a745' : velocity.linear < 0 ? '#dc3545' : '#667eea' }
+                        }}
+                      />
+                      <span style={{ fontSize: 12, color: '#dc3545', marginTop: 4 }}>后退</span>
+                    </div>
+                    <div style={{ 
+                      fontSize: 18, 
+                      fontWeight: 'bold', 
+                      color: velocity.linear > 0 ? '#28a745' : velocity.linear < 0 ? '#dc3545' : '#6c757d',
+                      marginTop: 8
+                    }}>
+                      {velocity.linear > 0 ? '前进 ' : velocity.linear < 0 ? '后退 ' : ''}
+                      {Math.abs(velocity.linear).toFixed(2)} m/s
+                    </div>
+                    <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>松手自动归零</div>
+                  </div>
+
+                </div>
+
+                {/* 停止按钮 */}
+                <Button
+                  type="primary"
+                  danger
+                  size="large"
+                  onClick={handleStopAll}
+                  style={{ width: '100%', marginTop: 16, height: 50, fontSize: 16 }}
+                >
+                  紧急停止
+                </Button>
+
+                {/* 当前状态显示 */}
+                <div style={{ 
+                  marginTop: 16,
                   textAlign: 'center',
                   background: 'white',
                   padding: '16px 24px',
@@ -387,7 +461,7 @@ const DeviceControl: React.FC = () => {
                   width: '100%'
                 }}>
                   <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
-                    当前速度状态
+                    当前状态
                   </div>
                   <div style={{ 
                     display: 'flex', 
@@ -401,9 +475,9 @@ const DeviceControl: React.FC = () => {
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: 12, color: '#6c757d' }}>角速度</div>
+                      <div style={{ fontSize: 12, color: '#6c757d' }}>转向角度</div>
                       <div style={{ fontSize: 18, fontWeight: 'bold', color: '#764ba2' }}>
-                        {velocity.angular.toFixed(2)} rad/s
+                        {steerAngle}°
                       </div>
                     </div>
                   </div>
@@ -411,7 +485,7 @@ const DeviceControl: React.FC = () => {
 
                 {/* 完全接管模式切换按键 */}
                 <div style={{ 
-                  marginTop: 20,
+                  marginTop: 16,
                   textAlign: 'center',
                   background: isFullControlMode ? '#fff3cd' : '#d4edda',
                   padding: '16px 24px',
@@ -446,7 +520,7 @@ const DeviceControl: React.FC = () => {
                     lineHeight: 1.4
                   }}>
                     {isFullControlMode 
-                      ? '网页摇杆获得最高控制权，即使速度为0也保持控制' 
+                      ? '网页控制获得最高控制权，即使速度为0也保持控制' 
                       : '默认优先级管理，按照优先级规则切换控制源'}
                   </div>
                 </div>
