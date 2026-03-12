@@ -14,17 +14,8 @@ class ErrorLogger {
 
   constructor() {
     const getEndpoint = (): string => {
-      const envUrl = import.meta.env.VITE_API_BASE_URL;
-      
-      if (envUrl && envUrl.startsWith('/')) {
-        return `${window.location.protocol}//${window.location.hostname}:3000${envUrl}/system/logs/client-error`;
-      }
-      
-      if (envUrl) {
-        return `${envUrl}/system/logs/client-error`;
-      }
-      
-      return `${window.location.protocol}//${window.location.hostname}:3000/api/system/logs/client-error`;
+      // 使用相对路径通过Vite代理，避免CORS问题
+      return '/api/system/logs/client-error';
     };
     
     this.endpoint = getEndpoint();
