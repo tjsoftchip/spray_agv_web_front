@@ -137,12 +137,34 @@ const GPSMapping: React.FC = () => {
     // 连接WebSocket
     socketService.connect();
     
+    // 订阅GPS话题
+    socketService.sendRosCommand({
+      op: 'subscribe',
+      topic: '/gps/fix',
+      type: 'sensor_msgs/NavSatFix'
+    });
+    
+    socketService.sendRosCommand({
+      op: 'subscribe',
+      topic: '/gps/quality',
+      type: 'std_msgs/Int8'
+    });
+    
+    // 订阅GPS状态（包含卫星数和HDOP）
+    socketService.sendRosCommand({
+      op: 'subscribe',
+      topic: '/gps/status',
+      type: 'std_msgs/String'
+    });
+    
     // 监听GPS数据
     socketService.on('ros_message', (data: any) => {
       if (data.topic === '/gps/fix') {
         handleGPSData(data.msg);
       } else if (data.topic === '/gps/quality') {
         handleGPSQuality(data.msg);
+      } else if (data.topic === '/gps/status') {
+        handleGPSStatus(data.msg);
       }
     });
 
@@ -151,6 +173,9 @@ const GPSMapping: React.FC = () => {
 
     return () => {
       socketService.off('ros_message');
+      socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/fix' });
+      socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/quality' });
+      socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/status' });
     };
   }, []);
 
@@ -175,6 +200,23 @@ const GPSMapping: React.FC = () => {
       heading: msg.heading || prev?.heading || 0,
       speed: msg.speed || prev?.speed || 0
     } as GPSData));
+  }, []);
+  
+  // 处理GPS状态数据（JSON格式，包含卫星数和HDOP）
+  const handleGPSStatus = useCallback((msg: any) => {
+    try {
+      const statusStr = msg.data || msg;
+      const status = typeof statusStr === 'string' ? JSON.parse(statusStr) : statusStr;
+      setGpsData(prev => ({
+        ...prev,
+        quality: status.quality || 0,
+        satellites: status.satellites || 0,
+        hdop: status.hdop || 99,
+        timestamp: Date.now()
+      } as GPSData));
+    } catch (e) {
+      console.error('Failed to parse GPS status:', e);
+    }
   }, []);
 
   // 加载已保存的数据

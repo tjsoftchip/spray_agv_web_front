@@ -60,11 +60,11 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       type: 'std_msgs/msg/Bool'
     });
     
-    // 订阅GPS状态
+    // 订阅GPS状态（JSON格式）
     socketService.sendRosCommand({
       op: 'subscribe',
       topic: '/gps/status',
-      type: 'gps_msgs/msg/GPSStatus'
+      type: 'std_msgs/String'
     });
     
     // 订阅电池状态
