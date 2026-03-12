@@ -170,8 +170,8 @@ const StatusMonitor: React.FC = () => {
         setBatteryLevel(batteryValue);
       }
       
-      // 处理水位实时更新
-      if (data.topic === '/water_monitor/level' && data.msg) {
+      // 处理水位实时更新 - 修复话题名称为 /water_level
+      if (data.topic === '/water_level' && data.msg) {
         const waterValue = Math.round(data.msg.data || 0);
         setWaterLevel(waterValue);
       }
@@ -247,47 +247,55 @@ const StatusMonitor: React.FC = () => {
         }));
       }
 
+      // 处理GPS状态数据（JSON格式）
       if (data.topic === '/gps/status' && data.msg) {
-        const status = data.msg;
-        setGpsStatus(prev => ({
-          quality: status.fix_type || 0,
-          satellites: status.satellites_used || 0,
-          hdop: status.hdop || 99.99,
-          latitude: prev?.latitude ?? 0,
-          longitude: prev?.longitude ?? 0,
-          altitude: prev?.altitude ?? 0,
-          isFixed: status.fix_type >= 1
-        }));
-        
-        // 检测GPS丢失（quality为0表示无定位）
-        if (status.fix_type === 0) {
-          if (!gpsLostStartTimeRef.current) {
-            gpsLostStartTimeRef.current = Date.now();
-          }
-          const lostDuration = (Date.now() - gpsLostStartTimeRef.current) / 1000;
-          // 超过10秒触发报警
-          if (lostDuration > 10) {
-            setAlarms(prev => {
-              const exists = prev.find(a => a.type === 'gps_lost');
-              if (exists) {
-                return prev.map(a => a.type === 'gps_lost' ? {
-                  ...a,
+        try {
+          // 尝试解析JSON格式的状态数据
+          const statusStr = data.msg.data || data.msg;
+          const status = typeof statusStr === 'string' ? JSON.parse(statusStr) : statusStr;
+          
+          setGpsStatus(prev => ({
+            quality: status.quality || 0,
+            satellites: status.satellites || 0,
+            hdop: status.hdop || 99.99,
+            latitude: prev?.latitude ?? 0,
+            longitude: prev?.longitude ?? 0,
+            altitude: prev?.altitude ?? 0,
+            isFixed: status.quality >= 1
+          }));
+          
+          // 检测GPS丢失（quality为0表示无定位）
+          if (status.quality === 0) {
+            if (!gpsLostStartTimeRef.current) {
+              gpsLostStartTimeRef.current = Date.now();
+            }
+            const lostDuration = (Date.now() - gpsLostStartTimeRef.current) / 1000;
+            // 超过10秒触发报警
+            if (lostDuration > 10) {
+              setAlarms(prev => {
+                const exists = prev.find(a => a.type === 'gps_lost');
+                if (exists) {
+                  return prev.map(a => a.type === 'gps_lost' ? {
+                    ...a,
+                    message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
+                    timestamp: Date.now()
+                  } : a);
+                }
+                return [...prev, {
+                  level: 'error' as const,
+                  type: 'gps_lost',
                   message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
                   timestamp: Date.now()
-                } : a);
-              }
-              return [...prev, {
-                level: 'error' as const,
-                type: 'gps_lost',
-                message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
-                timestamp: Date.now()
-              }];
-            });
+                }];
+              });
+            }
+          } else {
+            // GPS恢复，清除报警
+            gpsLostStartTimeRef.current = null;
+            setAlarms(prev => prev.filter(a => a.type !== 'gps_lost'));
           }
-        } else {
-          // GPS恢复，清除报警
-          gpsLostStartTimeRef.current = null;
-          setAlarms(prev => prev.filter(a => a.type !== 'gps_lost'));
+        } catch (e) {
+          console.error('Failed to parse GPS status:', e);
         }
       }
       
@@ -394,7 +402,7 @@ const StatusMonitor: React.FC = () => {
       // 订阅水位
       socketService.sendRosCommand({
         op: 'subscribe',
-        topic: '/water_monitor/level',
+        topic: '/water_level',
         type: 'std_msgs/Float32'
       });
     };
@@ -407,10 +415,11 @@ const StatusMonitor: React.FC = () => {
         type: 'sensor_msgs/NavSatFix'
       });
 
+      // 订阅GPS状态（JSON格式）
       socketService.sendRosCommand({
         op: 'subscribe',
         topic: '/gps/status',
-        type: 'gps_msgs/GPSStatus'
+        type: 'std_msgs/String'
       });
     };
 
@@ -492,7 +501,7 @@ const StatusMonitor: React.FC = () => {
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/amcl_pose' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/odom' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/battery_level' });
-        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/water_monitor/level' });
+        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/water_level' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/fix' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/status' });
         
