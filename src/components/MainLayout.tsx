@@ -60,7 +60,14 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       type: 'std_msgs/msg/Bool'
     });
     
-    // 订阅GPS状态（JSON格式）
+    // 订阅GPS质量（直接获取RTK质量值）
+    socketService.sendRosCommand({
+      op: 'subscribe',
+      topic: '/gps/quality',
+      type: 'std_msgs/Int8'
+    });
+    
+    // 订阅GPS状态（JSON格式，获取卫星数）
     socketService.sendRosCommand({
       op: 'subscribe',
       topic: '/gps/status',
@@ -89,6 +96,10 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       });
       socketService.sendRosCommand({
         op: 'unsubscribe',
+        topic: '/gps/quality'
+      });
+      socketService.sendRosCommand({
+        op: 'unsubscribe',
         topic: '/gps/status'
       });
       socketService.sendRosCommand({
@@ -109,18 +120,26 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       if (data.topic === '/emergency_stop_status') {
         const isActive = data.msg.data;
         setEmergencyActive(isActive);
+      } else if (data.topic === '/gps/quality') {
+        // GPS质量（直接从 /gps/quality 话题获取，这是最准确的RTK质量值）
+        const quality = data.msg.data ?? data.msg ?? 0;
+        setGpsStatus(prev => ({
+          quality: quality,
+          satellites: prev?.satellites ?? 0,
+          isFixed: quality === 4 || quality === 5  // RTK Fixed=4, RTK Float=5
+        }));
       } else if (data.topic === '/gps/status') {
-        // GPS状态（JSON格式）
+        // GPS状态（JSON格式，获取卫星数）
         try {
           const statusStr = data.msg.data || data.msg;
           const status = typeof statusStr === 'string' ? JSON.parse(statusStr) : statusStr;
-          const quality = status.quality || 0;
           const satellites = status.satellites || 0;
-          setGpsStatus({
-            quality,
-            satellites,
-            isFixed: quality === 4 || quality === 5
-          });
+          // 不覆盖 quality，因为 /gps/quality 话题的值更准确
+          setGpsStatus(prev => ({
+            quality: prev?.quality ?? status.quality ?? 0,
+            satellites: satellites,
+            isFixed: prev?.quality === 4 || prev?.quality === 5
+          }));
         } catch (e) {
           console.error('Failed to parse GPS status:', e);
         }

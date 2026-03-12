@@ -243,11 +243,56 @@ const StatusMonitor: React.FC = () => {
           latitude: fix.latitude || 0,
           longitude: fix.longitude || 0,
           altitude: fix.altitude || 0,
-          isFixed: fix.status?.status >= 1
+          isFixed: prev?.quality === 4 || prev?.quality === 5
         }));
       }
 
-      // 处理GPS状态数据（JSON格式）
+      // 处理GPS质量数据（直接从 /gps/quality 话题获取）
+      if (data.topic === '/gps/quality' && data.msg) {
+        const quality = data.msg.data ?? data.msg ?? 0;
+        setGpsStatus(prev => ({
+          quality: quality,
+          satellites: prev?.satellites ?? 0,
+          hdop: prev?.hdop ?? 99.99,
+          latitude: prev?.latitude ?? 0,
+          longitude: prev?.longitude ?? 0,
+          altitude: prev?.altitude ?? 0,
+          isFixed: quality === 4 || quality === 5  // RTK Fixed=4, RTK Float=5
+        }));
+        
+        // 检测GPS丢失（quality为0表示无定位）
+        if (quality === 0) {
+          if (!gpsLostStartTimeRef.current) {
+            gpsLostStartTimeRef.current = Date.now();
+          }
+          const lostDuration = (Date.now() - gpsLostStartTimeRef.current) / 1000;
+          // 超过10秒触发报警
+          if (lostDuration > 10) {
+            setAlarms(prev => {
+              const exists = prev.find(a => a.type === 'gps_lost');
+              if (exists) {
+                return prev.map(a => a.type === 'gps_lost' ? {
+                  ...a,
+                  message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
+                  timestamp: Date.now()
+                } : a);
+              }
+              return [...prev, {
+                level: 'error' as const,
+                type: 'gps_lost',
+                message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
+                timestamp: Date.now()
+              }];
+            });
+          }
+        } else {
+          // GPS恢复，清除报警
+          gpsLostStartTimeRef.current = null;
+          setAlarms(prev => prev.filter(a => a.type !== 'gps_lost'));
+        }
+      }
+
+      // 处理GPS状态数据（JSON格式，获取卫星数和HDOP）
       if (data.topic === '/gps/status' && data.msg) {
         try {
           // 尝试解析JSON格式的状态数据
@@ -255,45 +300,14 @@ const StatusMonitor: React.FC = () => {
           const status = typeof statusStr === 'string' ? JSON.parse(statusStr) : statusStr;
           
           setGpsStatus(prev => ({
-            quality: status.quality || 0,
+            quality: prev?.quality ?? status.quality ?? 0,  // 优先使用 /gps/quality 的值
             satellites: status.satellites || 0,
             hdop: status.hdop || 99.99,
             latitude: prev?.latitude ?? 0,
             longitude: prev?.longitude ?? 0,
             altitude: prev?.altitude ?? 0,
-            isFixed: status.quality >= 1
+            isFixed: prev?.quality === 4 || prev?.quality === 5
           }));
-          
-          // 检测GPS丢失（quality为0表示无定位）
-          if (status.quality === 0) {
-            if (!gpsLostStartTimeRef.current) {
-              gpsLostStartTimeRef.current = Date.now();
-            }
-            const lostDuration = (Date.now() - gpsLostStartTimeRef.current) / 1000;
-            // 超过10秒触发报警
-            if (lostDuration > 10) {
-              setAlarms(prev => {
-                const exists = prev.find(a => a.type === 'gps_lost');
-                if (exists) {
-                  return prev.map(a => a.type === 'gps_lost' ? {
-                    ...a,
-                    message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
-                    timestamp: Date.now()
-                  } : a);
-                }
-                return [...prev, {
-                  level: 'error' as const,
-                  type: 'gps_lost',
-                  message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
-                  timestamp: Date.now()
-                }];
-              });
-            }
-          } else {
-            // GPS恢复，清除报警
-            gpsLostStartTimeRef.current = null;
-            setAlarms(prev => prev.filter(a => a.type !== 'gps_lost'));
-          }
         } catch (e) {
           console.error('Failed to parse GPS status:', e);
         }
@@ -415,7 +429,14 @@ const StatusMonitor: React.FC = () => {
         type: 'sensor_msgs/NavSatFix'
       });
 
-      // 订阅GPS状态（JSON格式）
+      // 订阅GPS质量（直接获取RTK质量值）
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/gps/quality',
+        type: 'std_msgs/Int8'
+      });
+
+      // 订阅GPS状态（JSON格式，包含卫星数和HDOP）
       socketService.sendRosCommand({
         op: 'subscribe',
         topic: '/gps/status',
