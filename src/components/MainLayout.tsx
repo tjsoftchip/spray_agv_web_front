@@ -110,14 +110,20 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         const isActive = data.msg.data;
         setEmergencyActive(isActive);
       } else if (data.topic === '/gps/status') {
-        // GPS状态
-        const quality = data.msg.status || data.msg.quality || 0;
-        const satellites = data.msg.num_sv || data.msg.satellites || 0;
-        setGpsStatus({
-          quality,
-          satellites,
-          isFixed: quality === 4 || quality === 5
-        });
+        // GPS状态（JSON格式）
+        try {
+          const statusStr = data.msg.data || data.msg;
+          const status = typeof statusStr === 'string' ? JSON.parse(statusStr) : statusStr;
+          const quality = status.quality || 0;
+          const satellites = status.satellites || 0;
+          setGpsStatus({
+            quality,
+            satellites,
+            isFixed: quality === 4 || quality === 5
+          });
+        } catch (e) {
+          console.error('Failed to parse GPS status:', e);
+        }
       } else if (data.topic === '/battery_level') {
         setBatteryLevel(data.msg.data);
       } else if (data.topic === '/water_level') {
