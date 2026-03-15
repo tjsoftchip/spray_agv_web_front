@@ -59,7 +59,7 @@ export const navigationApi = {
 
 export const obstacleApi = {
   getStatus: async (): Promise<ObstacleStatus> => {
-    return apiService.get('/obstacles/status');
+    return apiService.get('/obstacles/status-local');
   },
 
   configDetection: async (config: {

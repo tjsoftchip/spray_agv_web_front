@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Card, Row, Col, Progress, Tag, Button, Space, Switch, Badge, Tooltip } from 'antd';
+import { Card, Row, Col, Progress, Tag, Button, Space, Switch, Badge, Tooltip, notification } from 'antd';
 import { 
   PlayCircleOutlined, 
   PauseOutlined, 
   StopOutlined,
   EyeOutlined,
   CompassOutlined,
-  GlobalOutlined
+  GlobalOutlined,
+  WarningOutlined,
+  CloseCircleOutlined
 } from '@ant-design/icons';
 import MapViewer from '../components/MapViewer';
 import { socketService } from '../services/socket';
@@ -60,13 +62,30 @@ const StatusMonitor: React.FC = () => {
     isFixed: boolean;
   } | null>(null);
   
-  // 报警状态 - 数组形式便于显示
-  const [alarms, setAlarms] = useState<Array<{
-    level: 'info' | 'warning' | 'error' | 'critical';
+  // 报警状态 - 来自 alarm_manager_node 的完整报警信息
+  interface AlarmItem {
+    alarm_id: string;
+    alarm_type: string;
+    priority: number;  // 1=LOW, 2=MEDIUM, 3=HIGH, 4=CRITICAL
+    message: string;
+    source: string;
+    timestamp: number;
+    acknowledged: boolean;
+    count: number;
+    details: Record<string, any>;
+  }
+  
+  const [alarms, setAlarms] = useState<AlarmItem[]>([]);
+  const [alarmCount, setAlarmCount] = useState(0);
+  
+  // 报警通知（用于弹窗提醒）
+  const [alarmNotify, setAlarmNotify] = useState<{
     type: string;
+    priority: number;
+    title: string;
     message: string;
     timestamp: number;
-  }>>([]);
+  } | null>(null);
   
   // GPS丢失计时器
   const gpsLostStartTimeRef = useRef<number | null>(null);
@@ -261,34 +280,15 @@ const StatusMonitor: React.FC = () => {
         }));
         
         // 检测GPS丢失（quality为0表示无定位）
+        // 注意：GPS丢失报警现在由 alarm_manager_node 统一管理
+        // 这里只更新本地GPS状态显示，不再手动触发报警
         if (quality === 0) {
           if (!gpsLostStartTimeRef.current) {
             gpsLostStartTimeRef.current = Date.now();
           }
-          const lostDuration = (Date.now() - gpsLostStartTimeRef.current) / 1000;
-          // 超过10秒触发报警
-          if (lostDuration > 10) {
-            setAlarms(prev => {
-              const exists = prev.find(a => a.type === 'gps_lost');
-              if (exists) {
-                return prev.map(a => a.type === 'gps_lost' ? {
-                  ...a,
-                  message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
-                  timestamp: Date.now()
-                } : a);
-              }
-              return [...prev, {
-                level: 'error' as const,
-                type: 'gps_lost',
-                message: `GPS信号丢失 - 已持续${Math.floor(lostDuration)}秒`,
-                timestamp: Date.now()
-              }];
-            });
-          }
         } else {
-          // GPS恢复，清除报警
+          // GPS恢复
           gpsLostStartTimeRef.current = null;
-          setAlarms(prev => prev.filter(a => a.type !== 'gps_lost'));
         }
       }
 
@@ -313,76 +313,64 @@ const StatusMonitor: React.FC = () => {
         }
       }
       
-      // 处理报警消息
+      // ========== 报警管理核心话题 ==========
+      
+      // 处理活跃报警列表（来自 alarm_manager_node）
+      if (data.topic === '/alarm/active' && data.msg) {
+        try {
+          const alarmData = JSON.parse(data.msg.data || data.msg);
+          setAlarmCount(alarmData.count || 0);
+          setAlarms(alarmData.alarms || []);
+        } catch (e) {
+          console.error('Failed to parse active alarms:', e);
+        }
+      }
+      
+      // 处理报警通知（用于弹窗提醒）
+      if (data.topic === '/alarm/notify' && data.msg) {
+        try {
+          const notifyData = JSON.parse(data.msg.data || data.msg);
+          setAlarmNotify(notifyData);
+          
+          // 显示弹窗提醒
+          const priorityConfig: Record<number, { type: 'success' | 'info' | 'warning' | 'error', icon: React.ReactNode }> = {
+            4: { type: 'error', icon: <CloseCircleOutlined style={{ color: '#ff4d4f' }} /> },
+            3: { type: 'error', icon: <WarningOutlined style={{ color: '#ff4d4f' }} /> },
+            2: { type: 'warning', icon: <WarningOutlined style={{ color: '#faad14' }} /> },
+            1: { type: 'info', icon: <WarningOutlined style={{ color: '#1890ff' }} /> }
+          };
+          const config = priorityConfig[notifyData.priority] || priorityConfig[1];
+          
+          notification[config.type]({
+            message: `报警: ${notifyData.title}`,
+            description: notifyData.message,
+            icon: config.icon,
+            duration: notifyData.priority >= 3 ? 0 : 5, // 高优先级不自动关闭
+            placement: 'topRight',
+            key: notifyData.timestamp?.toString(),
+            btn: notifyData.priority >= 3 ? (
+              <Button type="primary" size="small" onClick={() => notification.destroy(notifyData.timestamp?.toString())}>
+                我知道了
+              </Button>
+            ) : undefined
+          });
+          
+          // 3秒后自动清除通知状态
+          setTimeout(() => setAlarmNotify(null), 3000);
+        } catch (e) {
+          console.error('Failed to parse alarm notify:', e);
+        }
+      }
+      
+      // 兼容旧的 /alarm 话题（简单字符串报警）
       if (data.topic === '/alarm' && data.msg) {
         const alarmMsg = data.msg.data || data.msg;
-        setAlarms(prev => {
-          // 避免重复报警
-          const exists = prev.find(a => a.message === alarmMsg);
-          if (exists) return prev;
-          return [...prev, {
-            level: 'warning' as const,
-            type: 'general',
-            message: alarmMsg,
-            timestamp: Date.now()
-          }];
-        });
-      }
-      
-      // 处理低电量报警
-      if (data.topic === '/battery_low' && data.msg) {
-        const isLow = data.msg.data;
-        if (isLow) {
-          setAlarms(prev => {
-            const exists = prev.find(a => a.type === 'low_battery');
-            if (exists) return prev;
-            return [...prev, {
-              level: 'warning' as const,
-              type: 'low_battery',
-              message: `低电量警告 - 当前电量${batteryLevel ? batteryLevel.toFixed(0) : '?'}%`,
-              timestamp: Date.now()
-            }];
-          });
-        } else {
-          setAlarms(prev => prev.filter(a => a.type !== 'low_battery'));
-        }
-      }
-      
-      // 处理低水位报警
-      if (data.topic === '/water_level_low' && data.msg) {
-        const isLow = data.msg.data;
-        if (isLow) {
-          setAlarms(prev => {
-            const exists = prev.find(a => a.type === 'low_water');
-            if (exists) return prev;
-            return [...prev, {
-              level: 'warning' as const,
-              type: 'low_water',
-              message: `低水位警告 - 当前水位${waterLevel ? waterLevel.toFixed(0) : '?'}%`,
-              timestamp: Date.now()
-            }];
-          });
-        } else {
-          setAlarms(prev => prev.filter(a => a.type !== 'low_water'));
-        }
-      }
-      
-      // 处理障碍等待超时报警
-      if (data.topic === '/obstacle_wait_timeout' && data.msg) {
-        const isTimeout = data.msg.data;
-        if (isTimeout) {
-          setAlarms(prev => {
-            const exists = prev.find(a => a.type === 'obstacle_wait_timeout');
-            if (exists) return prev;
-            return [...prev, {
-              level: 'error' as const,
-              type: 'obstacle_wait_timeout',
-              message: '障碍等待超时 - 请人工处理',
-              timestamp: Date.now()
-            }];
-          });
-        } else {
-          setAlarms(prev => prev.filter(a => a.type !== 'obstacle_wait_timeout'));
+        // 如果不是JSON格式，当作简单报警处理
+        try {
+          JSON.parse(alarmMsg);
+        } catch {
+          // 简单字符串报警，不再单独处理（已由 alarm_manager_node 统一管理）
+          console.log('Legacy alarm message:', alarmMsg);
         }
       }
     };
@@ -444,34 +432,27 @@ const StatusMonitor: React.FC = () => {
       });
     };
 
-    // 订阅报警相关话题
+    // 订阅报警相关话题（使用 alarm_manager_node 的核心话题）
     const subscribeToAlarms = () => {
-      // 报警信息
+      // 活跃报警列表（来自 alarm_manager_node）
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/alarm/active',
+        type: 'std_msgs/String'
+      });
+
+      // 报警通知（用于弹窗提醒）
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/alarm/notify',
+        type: 'std_msgs/String'
+      });
+
+      // 兼容旧的 /alarm 话题
       socketService.sendRosCommand({
         op: 'subscribe',
         topic: '/alarm',
         type: 'std_msgs/String'
-      });
-
-      // 低电量报警
-      socketService.sendRosCommand({
-        op: 'subscribe',
-        topic: '/battery_low',
-        type: 'std_msgs/Bool'
-      });
-
-      // 低水位报警
-      socketService.sendRosCommand({
-        op: 'subscribe',
-        topic: '/water_level_low',
-        type: 'std_msgs/Bool'
-      });
-
-      // 障碍等待超时
-      socketService.sendRosCommand({
-        op: 'subscribe',
-        topic: '/obstacle_wait_timeout',
-        type: 'std_msgs/Bool'
       });
     };
 
@@ -482,23 +463,15 @@ const StatusMonitor: React.FC = () => {
     // 定时获取电池和水位状态（每10秒）
     const statusInterval = setInterval(async () => {
       try {
-        // 获取电池状态
-        const batteryResponse = await fetch('/api/robot/battery/status', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
+        // 获取电池状态（使用本地端点，不需要认证）
+        const batteryResponse = await fetch('/api/robot/battery/status-local');
         if (batteryResponse.ok) {
           const batteryData = await batteryResponse.json();
           setBatteryLevel(batteryData.batteryLevel || 0);
         }
 
-        // 获取水位状态
-        const waterResponse = await fetch('/api/robot/water/status', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
+        // 获取水位状态（使用本地端点，不需要认证）
+        const waterResponse = await fetch('/api/robot/water/status-local');
         if (waterResponse.ok) {
           const waterData = await waterResponse.json();
           setWaterLevel(waterData.waterLevel || 0);
@@ -547,15 +520,13 @@ const StatusMonitor: React.FC = () => {
 
   const loadInitialData = async () => {
     try {
-      // 并行加载所有初始数据
+      // 并行加载所有初始数据（使用本地端点，不需要认证）
       const [obstacleData, batteryData, waterData] = await Promise.all([
         obstacleApi.getStatus().catch(() => null),
-        fetch('/api/robot/battery/status', {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        }).then(res => res.ok ? res.json() : null).catch(() => null),
-        fetch('/api/robot/water/status', {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        }).then(res => res.ok ? res.json() : null).catch(() => null)
+        fetch('/api/robot/battery/status-local')
+          .then(res => res.ok ? res.json() : null).catch(() => null),
+        fetch('/api/robot/water/status-local')
+          .then(res => res.ok ? res.json() : null).catch(() => null)
       ]);
 
       if (obstacleData) {
@@ -656,6 +627,45 @@ const StatusMonitor: React.FC = () => {
     }
     
     return avgSpeed;
+  };
+
+  // 报警确认
+  const handleAcknowledgeAlarm = async (alarmId: string) => {
+    try {
+      // 通过 rosbridge 调用服务
+      socketService.sendRosCommand({
+        op: 'call_service',
+        service: '/alarm/acknowledge',
+        type: 'std_srvs/srv/Trigger',
+        args: { request: { alarm_id: alarmId } }
+      });
+      
+      // 本地更新状态（乐观更新）
+      setAlarms(prev => prev.map(a => 
+        a.alarm_id === alarmId ? { ...a, acknowledged: true } : a
+      ));
+    } catch (error) {
+      console.error('Failed to acknowledge alarm:', error);
+    }
+  };
+
+  // 报警清除
+  const handleClearAlarm = async (alarmId: string) => {
+    try {
+      // 通过 rosbridge 调用服务
+      socketService.sendRosCommand({
+        op: 'call_service',
+        service: '/alarm/clear',
+        type: 'std_srvs/srv/Trigger',
+        args: { request: { alarm_id: alarmId } }
+      });
+      
+      // 本地移除报警（乐观更新）
+      setAlarms(prev => prev.filter(a => a.alarm_id !== alarmId));
+      setAlarmCount(prev => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error('Failed to clear alarm:', error);
+    }
   };
 
   return (
@@ -923,27 +933,64 @@ const StatusMonitor: React.FC = () => {
           >
             <div>
               <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
-                {alarms.length > 0 ? '⚠️ 系统报警' : '✅ 系统状态'}
+                {alarms.length > 0 ? `⚠️ 系统报警 (${alarmCount})` : '✅ 系统状态'}
               </div>
               {alarms.length > 0 ? (
-                <div style={{ maxHeight: 100, overflow: 'auto' }}>
-                  {alarms.map((alarm, index) => (
-                    <div 
-                      key={index}
-                      style={{ 
-                        fontSize: '12px', 
-                        color: alarm.level === 'error' ? '#ff4d4f' : 
-                               alarm.level === 'warning' ? '#fa8c16' : '#1890ff',
-                        marginBottom: '4px',
-                        padding: '2px 6px',
-                        background: alarm.level === 'error' ? '#fff1f0' : 
-                                   alarm.level === 'warning' ? '#fff7e6' : '#e6f7ff',
-                        borderRadius: '4px'
-                      }}
-                    >
-                      {alarm.level === 'error' ? '🔴' : alarm.level === 'warning' ? '🟡' : '🔵'} {alarm.message}
-                    </div>
-                  ))}
+                <div style={{ maxHeight: 120, overflow: 'auto' }}>
+                  {alarms.map((alarm) => {
+                    const priorityConfig = {
+                      4: { label: '严重', color: '#ff4d4f', bg: '#fff1f0', icon: '🔴' },
+                      3: { label: '高', color: '#fa8c16', bg: '#fff7e6', icon: '🟠' },
+                      2: { label: '中', color: '#faad14', bg: '#fffbe6', icon: '🟡' },
+                      1: { label: '低', color: '#1890ff', bg: '#e6f7ff', icon: '🔵' }
+                    };
+                    const config = priorityConfig[alarm.priority as keyof typeof priorityConfig] || priorityConfig[1];
+                    const timeStr = new Date(alarm.timestamp * 1000).toLocaleTimeString();
+                    
+                    return (
+                      <div 
+                        key={alarm.alarm_id}
+                        style={{ 
+                          fontSize: '11px', 
+                          color: config.color,
+                          marginBottom: '4px',
+                          padding: '4px 6px',
+                          background: config.bg,
+                          borderRadius: '4px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <span>
+                          {config.icon} [{config.label}] {alarm.message}
+                          {alarm.count > 1 && <span style={{marginLeft: 4}}>(×{alarm.count})</span>}
+                          <span style={{marginLeft: 4, color: '#999'}}>{timeStr}</span>
+                        </span>
+                        <Space size={4}>
+                          {!alarm.acknowledged && (
+                            <Button 
+                              size="small" 
+                              type="link"
+                              style={{ fontSize: '10px', padding: '0 4px', height: 'auto' }}
+                              onClick={() => handleAcknowledgeAlarm(alarm.alarm_id)}
+                            >
+                              确认
+                            </Button>
+                          )}
+                          <Button 
+                            size="small" 
+                            type="link"
+                            danger
+                            style={{ fontSize: '10px', padding: '0 4px', height: 'auto' }}
+                            onClick={() => handleClearAlarm(alarm.alarm_id)}
+                          >
+                            清除
+                          </Button>
+                        </Space>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div style={{ fontSize: '14px', color: '#52c41a', fontWeight: 500 }}>
