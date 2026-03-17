@@ -1018,17 +1018,30 @@ const StatusMonitor: React.FC = () => {
               <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
                 📡 激光雷达
               </div>
-              <div style={{ 
-                fontSize: '18px', 
-                fontWeight: 600, 
-                color: obstacleStatus?.laser_detected ? '#ff4d4f' : '#52c41a'
-              }}>
-                {obstacleStatus?.laser_detected ? '⚠️ 检测到障碍' : '✓ 正常运行'}
-              </div>
-              {obstacleStatus?.closest_laser_distance !== null && obstacleStatus?.closest_laser_distance !== undefined && (
-                <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
-                  最近距离: {obstacleStatus.closest_laser_distance.toFixed(2)}米
-                </div>
+              {obstacleStatus?.status === 'UNKNOWN' ? (
+                <>
+                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#999' }}>
+                    ⏳ 等待传感器数据
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+                    传感器未启动或离线
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ 
+                    fontSize: '18px', 
+                    fontWeight: 600, 
+                    color: obstacleStatus?.laser_detected ? '#ff4d4f' : '#52c41a'
+                  }}>
+                    {obstacleStatus?.laser_detected ? '⚠️ 检测到障碍' : '✓ 正常运行'}
+                  </div>
+                  {obstacleStatus?.closest_laser_distance !== null && obstacleStatus?.closest_laser_distance !== undefined && (
+                    <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+                      最近距离: {obstacleStatus.closest_laser_distance.toFixed(2)}米
+                    </div>
+                  )}
+                </>
               )}
               {!obstacleStatus && (
                 <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
@@ -1053,17 +1066,30 @@ const StatusMonitor: React.FC = () => {
               <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
                 📷 深度相机
               </div>
-              <div style={{ 
-                fontSize: '18px', 
-                fontWeight: 600, 
-                color: obstacleStatus?.camera_detected ? '#ff4d4f' : '#52c41a'
-              }}>
-                {obstacleStatus?.camera_detected ? '⚠️ 检测到障碍' : '✓ 正常运行'}
-              </div>
-              {obstacleStatus?.closest_depth_distance !== null && obstacleStatus?.closest_depth_distance !== undefined && (
-                <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
-                  最近距离: {obstacleStatus.closest_depth_distance.toFixed(2)}米
-                </div>
+              {obstacleStatus?.status === 'UNKNOWN' ? (
+                <>
+                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#999' }}>
+                    ⏳ 等待传感器数据
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+                    传感器未启动或离线
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ 
+                    fontSize: '18px', 
+                    fontWeight: 600, 
+                    color: obstacleStatus?.camera_detected ? '#ff4d4f' : '#52c41a'
+                  }}>
+                    {obstacleStatus?.camera_detected ? '⚠️ 检测到障碍' : '✓ 正常运行'}
+                  </div>
+                  {obstacleStatus?.closest_depth_distance !== null && obstacleStatus?.closest_depth_distance !== undefined && (
+                    <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+                      最近距离: {obstacleStatus.closest_depth_distance.toFixed(2)}米
+                    </div>
+                  )}
+                </>
               )}
               {!obstacleStatus && (
                 <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>

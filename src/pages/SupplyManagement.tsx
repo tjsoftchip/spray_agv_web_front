@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Button, Space, Statistic, Tag, message, Switch } from 'antd';
+import { Card, Row, Col, Button, Space, Tag, message, Switch } from 'antd';
 import { EnvironmentOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { socketService } from '../services/socket';
 import { supplyManagementApi } from '../services/api';
@@ -17,9 +17,6 @@ const SupplyManagement: React.FC = () => {
   });
   const [relayStatus, setRelayStatus] = useState<any>(null);
   const [chargingStatus, setChargingStatus] = useState<any>(null);
-  const [gpuMetrics, setGpuMetrics] = useState<any>(null);
-  const [systemMetrics, setSystemMetrics] = useState<any>(null);
-  const [taskStatus, setTaskStatus] = useState<any>(null);
   const [networkConfig, setNetworkConfig] = useState({
     relay_ip: '192.168.4.1',
     relay_port: 80,
@@ -104,17 +101,11 @@ const SupplyManagement: React.FC = () => {
     
     const initializeData = async () => {
       await loadNetworkConfig();
-      loadGPUMetrics();
-      loadSystemMetrics();
-      loadTaskStatus();
     };
     
     initializeData();
 
     const interval = setInterval(() => {
-      loadGPUMetrics();
-      loadSystemMetrics();
-      loadTaskStatus();
       if (relayStatus?.connected) {
         loadRelayStatus();
       }
@@ -164,33 +155,6 @@ const SupplyManagement: React.FC = () => {
     }
   }, [networkConfig.relay_ip, networkConfig.charging_ip, relayStatus?.ip, chargingStatus?.ipAddress]);
 
-  const loadGPUMetrics = async () => {
-    try {
-      const data = await supplyManagementApi.getGPUMetrics();
-      setGpuMetrics(data);
-    } catch (error: any) {
-      console.error('加载GPU指标失败:', error);
-    }
-  };
-
-  const loadSystemMetrics = async () => {
-    try {
-      const data = await supplyManagementApi.getSystemMetrics();
-      setSystemMetrics(data);
-    } catch (error: any) {
-      console.error('加载系统指标失败:', error);
-    }
-  };
-
-  const loadTaskStatus = async () => {
-    try {
-      const data = await supplyManagementApi.getSupplyStatus();
-      setTaskStatus(data);
-    } catch (error: any) {
-      console.error('加载任务状态失败:', error);
-    }
-  };
-
   const sendSupplyCommand = (action: string) => {
     socketService.sendRosCommand({
       op: 'publish',
@@ -204,7 +168,6 @@ const SupplyManagement: React.FC = () => {
     try {
       await supplyManagementApi.startSupply();
       message.success('开始补给');
-      loadTaskStatus();
     } catch (error: any) {
       message.error('开始补给失败');
     }
@@ -214,7 +177,6 @@ const SupplyManagement: React.FC = () => {
     try {
       await supplyManagementApi.stopSupply();
       message.success('停止补给');
-      loadTaskStatus();
     } catch (error: any) {
       message.error('停止补给失败');
     }
@@ -224,7 +186,6 @@ const SupplyManagement: React.FC = () => {
     try {
       await supplyManagementApi.pauseSupply();
       message.success('暂停补给');
-      loadTaskStatus();
     } catch (error: any) {
       message.error('暂停补给失败');
     }
@@ -234,7 +195,6 @@ const SupplyManagement: React.FC = () => {
     try {
       await supplyManagementApi.resumeSupply();
       message.success('恢复补给');
-      loadTaskStatus();
     } catch (error: any) {
       message.error('恢复补给失败');
     }
@@ -291,76 +251,6 @@ const SupplyManagement: React.FC = () => {
       message.success('手动触发补给流程');
     } else {
       message.warning('补给正在进行中，请稍后再试');
-    }
-  };
-
-  // 任务管理函数
-  const handleCreateTask = async () => {
-    try {
-      await supplyManagementApi.createTask();
-      message.success('创建任务成功');
-      loadTaskStatus();
-    } catch (error: any) {
-      message.error('创建任务失败');
-    }
-  };
-
-  const handleStartTask = async () => {
-    try {
-      await supplyManagementApi.startTask();
-      message.success('启动任务成功');
-      loadTaskStatus();
-    } catch (error: any) {
-      message.error('启动任务失败');
-    }
-  };
-
-  const handlePauseTask = async () => {
-    try {
-      await supplyManagementApi.pauseTask();
-      message.success('暂停任务成功');
-      loadTaskStatus();
-    } catch (error: any) {
-      message.error('暂停任务失败');
-    }
-  };
-
-  const handleResumeTask = async () => {
-    try {
-      await supplyManagementApi.resumeTask();
-      message.success('恢复任务成功');
-      loadTaskStatus();
-    } catch (error: any) {
-      message.error('恢复任务失败');
-    }
-  };
-
-  const handleSaveTask = async () => {
-    try {
-      await supplyManagementApi.saveTask();
-      message.success('保存任务成功');
-    } catch (error: any) {
-      message.error('保存任务失败');
-    }
-  };
-
-  const handleLoadTask = async () => {
-    try {
-      await supplyManagementApi.loadTask();
-      message.success('加载任务成功');
-      loadTaskStatus();
-    } catch (error: any) {
-      message.error('加载任务失败');
-    }
-  };
-
-  const handleStopTask = async () => {
-    try {
-      await supplyManagementApi.stopTask();
-      message.success('停止任务成功');
-      loadTaskStatus();
-    } catch (error: any) {
-      message.error('停止任务失败');
     }
   };
 
@@ -650,96 +540,6 @@ const SupplyManagement: React.FC = () => {
                 </Card>
               </Col>
             </Row>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* GPU监控和任务管理 */}
-      <Row gutter={[24, 24]} style={{ marginTop: '24px' }}>
-        <Col xs={24} lg={12}>
-          <Card 
-            title="🖥️ GPU监控" 
-            style={{ 
-              borderRadius: '12px', 
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-            }}
-          >
-            {gpuMetrics ? (
-              <Row gutter={[16, 16]}>
-                <Col xs={12}>
-                  <Statistic title="GPU利用率" value={gpuMetrics.utilization} suffix="%" />
-                </Col>
-                <Col xs={12}>
-                  <Statistic title="显存使用" value={gpuMetrics.memoryUsed} suffix={`MB / ${gpuMetrics.memoryTotal}MB`} />
-                </Col>
-                <Col xs={12}>
-                  <Statistic title="温度" value={gpuMetrics.temperature} suffix="°C" />
-                </Col>
-                <Col xs={12}>
-                  <Statistic title="功耗" value={gpuMetrics.powerDraw} suffix="W" />
-                </Col>
-              </Row>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
-                GPU数据加载中...
-              </div>
-            )}
-          </Card>
-        </Col>
-        
-        <Col xs={24} lg={12}>
-          <Card 
-            title="📋 任务管理" 
-            style={{ 
-              borderRadius: '12px', 
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-            }}
-          >
-            <Space vertical style={{ width: '100%' }}>
-              <Row gutter={[8, 8]}>
-                <Col xs={12}>
-                  <Button block onClick={handleCreateTask}>创建任务</Button>
-                </Col>
-                <Col xs={12}>
-                  <Button block onClick={handleStartTask}>启动任务</Button>
-                </Col>
-                <Col xs={12}>
-                  <Button block onClick={handlePauseTask}>暂停任务</Button>
-                </Col>
-                <Col xs={12}>
-                  <Button block onClick={handleResumeTask}>恢复任务</Button>
-                </Col>
-                <Col xs={12}>
-                  <Button block onClick={handleSaveTask}>保存任务</Button>
-                </Col>
-                <Col xs={12}>
-                  <Button block onClick={handleLoadTask}>加载任务</Button>
-                </Col>
-              </Row>
-              <Button type="primary" danger block onClick={handleStopTask}>
-                停止任务
-              </Button>
-            </Space>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* 补给控制增强 */}
-      <Row gutter={[24, 24]} style={{ marginTop: '24px' }}>
-        <Col xs={24}>
-          <Card 
-            title="🎮 补给控制" 
-            style={{ 
-              borderRadius: '12px', 
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-            }}
-          >
-            <Space size="large">
-              <Button type="primary" onClick={handleStartSupply}>启动补给</Button>
-              <Button onClick={handlePauseSupply}>暂停补给</Button>
-              <Button onClick={handleResumeSupply}>恢复补给</Button>
-              <Button danger onClick={handleStopSupply}>停止补给</Button>
-            </Space>
           </Card>
         </Col>
       </Row>
