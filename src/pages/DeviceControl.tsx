@@ -174,7 +174,7 @@ const DeviceControl: React.FC = () => {
       angular: { x: 0.0, y: 0.0, z: angular }
     };
     publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', twistMsg);
-    console.log(`发送速度: linear=${linear.toFixed(2)} m/s, steer=${(angular * 34).toFixed(1)}°`);
+    // 生产环境移除高频日志
   };
 
   // 启动定时发送
@@ -185,7 +185,7 @@ const DeviceControl: React.FC = () => {
     velocityIntervalRef.current = setInterval(() => {
       const { linear, angular } = currentVelocityRef.current;
       sendVelocityCommand(linear, angular);
-    }, 100); // 每100ms发送一次
+    }, 150); // 每150ms发送一次（约6-7Hz，平衡流畅度和性能）
   };
 
   // 停止定时发送
@@ -234,7 +234,6 @@ const DeviceControl: React.FC = () => {
 
   // 转向滑块松手归零
   const handleSteerRelease = () => {
-    console.log('转向滑块松手，归零');
     setSteerAngle(0);
     const angular = 0;
     const linear = velocity.linear;
@@ -253,7 +252,6 @@ const DeviceControl: React.FC = () => {
 
   // 线速度滑块松手归零
   const handleLinearRelease = () => {
-    console.log('线速度滑块松手，归零');
     setVelocity({ linear: 0, angular: velocity.angular });
     const linear = 0;
     const angular = steerAngle / 34;
@@ -275,9 +273,11 @@ const DeviceControl: React.FC = () => {
     setJoystickPosition({ x, y });
     
     const linear = y * maxSpeed;
-    const angular = x;
-    
+    // 计算转向角度（应用maxSteerAngle限制），然后镜像反转
     const angle = Math.round(x * maxSteerAngle);
+    // angular 基于34度比例，但使用受限制的角度值，并反转方向
+    const angular = -angle / 34;
+    
     setSteerAngle(angle);
     setVelocity({ linear, angular });
     currentVelocityRef.current = { linear, angular };
@@ -366,7 +366,6 @@ const DeviceControl: React.FC = () => {
 
   // 停止按钮处理
   const handleStopAll = () => {
-    console.log('停止所有运动');
     setVelocity({ linear: 0, angular: 0 });
     setSteerAngle(0);
     currentVelocityRef.current = { linear: 0, angular: 0 };

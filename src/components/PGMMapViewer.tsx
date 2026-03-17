@@ -277,12 +277,6 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
       return;
     }
     
-    console.log('Map metadata:', {
-      origin: currentMap.origin,
-      resolution: currentMap.resolution,
-      width: currentMap.width,
-      height: currentMap.height
-    });
 
     const rect = canvasRef.current.getBoundingClientRect();
     const x = event.clientX - rect.left;
@@ -331,12 +325,6 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
     const worldX = currentMap.origin.x + relativeWorldX;
     const worldY = currentMap.origin.y + (currentMap.height * currentMap.resolution - relativeWorldY);
 
-    console.log('=== 坐标转换详情 ===');
-    console.log(`点击位置: display(${x.toFixed(1)}, ${y.toFixed(1)}) -> canvas(${canvasX.toFixed(1)}, ${canvasY.toFixed(1)})`);
-    console.log(`地图偏移: mapOffset(${mapOffsetX.toFixed(1)}, ${mapOffsetY.toFixed(1)}), scale=${finalScale.toFixed(3)}`);
-    console.log(`相对坐标: relativeCanvas(${relativeX.toFixed(1)}, ${relativeY.toFixed(1)}) -> relativeWorld(${relativeWorldX.toFixed(3)}, ${relativeWorldY.toFixed(3)}m)`);
-    console.log(`世界坐标: world(${worldX.toFixed(3)}, ${worldY.toFixed(3)})`);
-    console.log('==================');
 
     // 验证结果
     if (isNaN(worldX) || isNaN(worldY)) {

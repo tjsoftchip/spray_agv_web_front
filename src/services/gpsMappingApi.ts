@@ -92,7 +92,7 @@ export const gpsMappingApi = {
   // ==================== 交叉点自动识别 ====================
 
   /**
-   * 生成交叉点
+   * 生成交叉点（同时自动生成转弯路线）
    */
   generateIntersections: () =>
     apiService.post('/gps-mapping/intersections/generate'),
@@ -102,6 +102,14 @@ export const gpsMappingApi = {
    */
   getIntersections: () =>
     apiService.get('/gps-mapping/intersections'),
+
+  // ==================== 转弯路线 ====================
+
+  /**
+   * 获取所有转弯路线
+   */
+  getTurnPaths: () =>
+    apiService.get('/gps-mapping/turn-paths'),
 
   // ==================== 梁位自动识别与标注 ====================
 

@@ -13,6 +13,7 @@ import {
 import MapViewer from '../components/MapViewer';
 import { socketService } from '../services/socket';
 import { navigationApi, obstacleApi } from '../services/navigationApi';
+import { systemApi } from '../services/systemApi';
 import type { ObstacleStatus } from '../services/navigationApi';
 
 interface NavigationStatus {
@@ -50,6 +51,16 @@ const StatusMonitor: React.FC = () => {
   const [useWebVideoServer, setUseWebVideoServer] = useState(true); // 使用 web_video_server
   const [controlLoading, setControlLoading] = useState(false);
   const [mapCenter] = useState<[number, number]>([0, 0]);
+  
+  // 传感器在线状态
+  const [lidarOnline, setLidarOnline] = useState(false);
+  const [cameraOnline, setCameraOnline] = useState(false);
+  
+  // 性能优化：节流refs
+  const lastVelUpdateRef = useRef<number>(0);
+  const lastPoseUpdateRef = useRef<number>(0);
+  const lastGpsUpdateRef = useRef<number>(0);
+  const THROTTLE_MS = 100; // 状态更新节流间隔
   
   // GPS 状态
   const [gpsStatus, setGpsStatus] = useState<{
@@ -174,6 +185,10 @@ const StatusMonitor: React.FC = () => {
 
     const handleRosMessage = (data: any) => {
       if (data.topic === '/vel_raw' && data.msg) {
+        const now = Date.now();
+        if (now - lastVelUpdateRef.current < THROTTLE_MS) return; // 节流
+        lastVelUpdateRef.current = now;
+        
         const linearVel = data.msg.linear?.x || 0;
         const angularVel = data.msg.angular?.z || 0;
         const rawSpeed = Math.abs(linearVel);
@@ -201,7 +216,8 @@ const StatusMonitor: React.FC = () => {
         }
 
         const now = Date.now();
-        if (now - lastCameraUpdateRef.current < 500) {
+        // 增加节流间隔到1000ms，减少图像处理频率
+        if (now - lastCameraUpdateRef.current < 1000) {
           return;
         }
         
@@ -227,29 +243,34 @@ const StatusMonitor: React.FC = () => {
               }
               
               ctx.putImageData(imageData, 0, 0);
-              const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
               setCameraImage(dataUrl);
               lastCameraUpdateRef.current = now;
             }
           }
-        } catch (error) {
-          console.error('Error processing camera image:', error);
+        } catch {
+          // 静默处理错误，避免控制台日志影响性能
         }
       }
       
-      if (data.topic === '/robot_pose' && data.msg && data.msg.pose) {
-        const position = data.msg.pose.position;
-        setRobotPosition({ x: position.x, y: position.y });
-      }
-      
-      if (data.topic === '/amcl_pose' && data.msg && data.msg.pose) {
-        const position = data.msg.pose.pose.position;
-        setRobotPosition({ x: position.x, y: position.y });
-      }
-      
-      if (data.topic === '/odom' && data.msg && data.msg.pose) {
-        const position = data.msg.pose.pose.position;
-        setRobotPosition({ x: position.x, y: position.y });
+      // 位姿更新节流
+      if ((data.topic === '/robot_pose' || data.topic === '/amcl_pose' || data.topic === '/odom') && data.msg) {
+        const now = Date.now();
+        if (now - lastPoseUpdateRef.current < THROTTLE_MS) return; // 节流
+        lastPoseUpdateRef.current = now;
+        
+        let position;
+        if (data.topic === '/robot_pose' && data.msg.pose) {
+          position = data.msg.pose.position;
+        } else if (data.topic === '/amcl_pose' && data.msg.pose) {
+          position = data.msg.pose.pose.position;
+        } else if (data.topic === '/odom' && data.msg.pose) {
+          position = data.msg.pose.pose.position;
+        }
+        
+        if (position) {
+          setRobotPosition({ x: position.x, y: position.y });
+        }
       }
 
       // 处理GPS数据
@@ -268,6 +289,10 @@ const StatusMonitor: React.FC = () => {
 
       // 处理GPS质量数据（直接从 /gps/quality 话题获取）
       if (data.topic === '/gps/quality' && data.msg) {
+        const now = Date.now();
+        if (now - lastGpsUpdateRef.current < THROTTLE_MS) return; // 节流
+        lastGpsUpdateRef.current = now;
+        
         const quality = data.msg.data ?? data.msg ?? 0;
         setGpsStatus(prev => ({
           quality: quality,
@@ -369,8 +394,7 @@ const StatusMonitor: React.FC = () => {
         try {
           JSON.parse(alarmMsg);
         } catch {
-          // 简单字符串报警，不再单独处理（已由 alarm_manager_node 统一管理）
-          console.log('Legacy alarm message:', alarmMsg);
+          // 简单字符串报警，已由 alarm_manager_node 统一管理
         }
       }
     };
@@ -459,30 +483,27 @@ const StatusMonitor: React.FC = () => {
     subscribeToBatteryAndWater();
     subscribeToGPS();
     subscribeToAlarms();
-
-    // 定时获取电池和水位状态（每10秒）
-    const statusInterval = setInterval(async () => {
+    
+    // 通过API检测传感器在线状态（每10秒检测一次）
+    const checkSensorsStatus = async () => {
       try {
-        // 获取电池状态（使用本地端点，不需要认证）
-        const batteryResponse = await fetch('/api/robot/battery/status-local');
-        if (batteryResponse.ok) {
-          const batteryData = await batteryResponse.json();
-          setBatteryLevel(batteryData.batteryLevel || 0);
+        const status = await systemApi.getSystemStatus();
+        if (status && status.functionalNodes && status.functionalNodes.sensors) {
+          setLidarOnline(status.functionalNodes.sensors.lidar === true);
+          setCameraOnline(status.functionalNodes.sensors.camera === true);
         }
-
-        // 获取水位状态（使用本地端点，不需要认证）
-        const waterResponse = await fetch('/api/robot/water/status-local');
-        if (waterResponse.ok) {
-          const waterData = await waterResponse.json();
-          setWaterLevel(waterData.waterLevel || 0);
-        }
-      } catch (error) {
-        console.error('Failed to fetch battery or water status:', error);
+      } catch {
+        // 静默处理错误，避免日志影响性能
       }
-    }, 10000);
+    };
+    checkSensorsStatus(); // 初始检测
+    const sensorStatusInterval = setInterval(checkSensorsStatus, 10000);
+
+    // 注意：电池和水位数据已通过 WebSocket 实时订阅（/battery_level, /water_level）
+    // 不再需要 HTTP 轮询，减少网络请求和 CPU 占用
 
     return () => {
-      clearInterval(statusInterval);
+      clearInterval(sensorStatusInterval);
       
       if (socketConnectedRef.current) {
         socketService.off('ros_message', handleRosMessage);
@@ -1018,23 +1039,23 @@ const StatusMonitor: React.FC = () => {
               <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
                 📡 激光雷达
               </div>
-              {obstacleStatus?.status === 'UNKNOWN' ? (
+              {!lidarOnline ? (
                 <>
-                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#999' }}>
-                    ⏳ 等待传感器数据
+                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#ff4d4f' }}>
+                    ✗ 传感器离线
                   </div>
                   <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
-                    传感器未启动或离线
+                    请启动雷达节点
                   </div>
                 </>
-              ) : (
+              ) : obstacleStatus?.laser_detected ? (
                 <>
                   <div style={{ 
                     fontSize: '18px', 
                     fontWeight: 600, 
-                    color: obstacleStatus?.laser_detected ? '#ff4d4f' : '#52c41a'
+                    color: '#ff4d4f'
                   }}>
-                    {obstacleStatus?.laser_detected ? '⚠️ 检测到障碍' : '✓ 正常运行'}
+                    ⚠️ 检测到障碍
                   </div>
                   {obstacleStatus?.closest_laser_distance !== null && obstacleStatus?.closest_laser_distance !== undefined && (
                     <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
@@ -1042,11 +1063,19 @@ const StatusMonitor: React.FC = () => {
                     </div>
                   )}
                 </>
-              )}
-              {!obstacleStatus && (
-                <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
-                  等待传感器数据
-                </div>
+              ) : (
+                <>
+                  <div style={{ 
+                    fontSize: '18px', 
+                    fontWeight: 600, 
+                    color: '#52c41a'
+                  }}>
+                    ✓ 正常运行
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+                    无障碍物
+                  </div>
+                </>
               )}
             </div>
           </Card>
@@ -1066,23 +1095,23 @@ const StatusMonitor: React.FC = () => {
               <div style={{ fontSize: '14px', color: '#666', marginBottom: '12px', fontWeight: 500 }}>
                 📷 深度相机
               </div>
-              {obstacleStatus?.status === 'UNKNOWN' ? (
+              {!cameraOnline ? (
                 <>
-                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#999' }}>
-                    ⏳ 等待传感器数据
+                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#ff4d4f' }}>
+                    ✗ 传感器离线
                   </div>
                   <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
-                    传感器未启动或离线
+                    请启动相机节点
                   </div>
                 </>
-              ) : (
+              ) : obstacleStatus?.camera_detected ? (
                 <>
                   <div style={{ 
                     fontSize: '18px', 
                     fontWeight: 600, 
-                    color: obstacleStatus?.camera_detected ? '#ff4d4f' : '#52c41a'
+                    color: '#ff4d4f'
                   }}>
-                    {obstacleStatus?.camera_detected ? '⚠️ 检测到障碍' : '✓ 正常运行'}
+                    ⚠️ 检测到障碍
                   </div>
                   {obstacleStatus?.closest_depth_distance !== null && obstacleStatus?.closest_depth_distance !== undefined && (
                     <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
@@ -1090,11 +1119,19 @@ const StatusMonitor: React.FC = () => {
                     </div>
                   )}
                 </>
-              )}
-              {!obstacleStatus && (
-                <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
-                  等待传感器数据
-                </div>
+              ) : (
+                <>
+                  <div style={{ 
+                    fontSize: '18px', 
+                    fontWeight: 600, 
+                    color: '#52c41a'
+                  }}>
+                    ✓ 正常运行
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+                    无障碍物
+                  </div>
+                </>
               )}
             </div>
           </Card>

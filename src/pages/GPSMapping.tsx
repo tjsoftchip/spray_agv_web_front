@@ -70,6 +70,20 @@ interface Intersection {
   connectedRoads: string[];
 }
 
+interface TurnPath {
+  id: string;
+  intersectionId: string;
+  fromRoad: string;
+  toRoad: string;
+  direction: 'left' | 'right' | 'straight' | 'uturn';
+  radius: number;
+  points: Array<{
+    seq: number;
+    gps: { latitude: number; longitude: number; altitude: number };
+    mapXy: { x: number; y: number };
+  }>;
+}
+
 interface BeamPosition {
   id: string;
   name: string;
@@ -115,6 +129,7 @@ const GPSMapping: React.FC = () => {
 
   // 交叉点和梁位
   const [intersections, setIntersections] = useState<Intersection[]>([]);
+  const [turnPaths, setTurnPaths] = useState<TurnPath[]>([]);
   const [beamPositions, setBeamPositions] = useState<BeamPosition[]>([]);
 
   // 地图视图
@@ -138,6 +153,10 @@ const GPSMapping: React.FC = () => {
   // 定时器
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentRoadIdRef = useRef<string | null>(null);
+  
+  // GPS 坐标转换节流 - 缓存上次转换结果
+  const lastConvertedGpsRef = useRef<{ lat: number; lon: number; x: number; y: number } | null>(null);
+  const GPS_THRESHOLD = 0.00001; // 约1米的经纬度变化阈值
 
   // ==================== 初始化 ====================
 
@@ -428,11 +447,23 @@ const GPSMapping: React.FC = () => {
 
   const generateIntersections = async () => {
     try {
-      message.loading({ content: '正在识别交叉点...', key: 'intersection' });
+      message.loading({ content: '正在识别交叉点和转弯路线...', key: 'intersection' });
       const response = await gpsMappingApi.generateIntersections();
       if (response.success) {
-        message.success({ content: response.message || `已识别 ${response.data?.length || 0} 个交叉点`, key: 'intersection' });
-        setIntersections(response.data || []);
+        // 处理返回的数据（包含交叉点和转弯路线）
+        const data = response.data;
+        if (data.intersections) {
+          setIntersections(data.intersections);
+        } else if (Array.isArray(data)) {
+          setIntersections(data);
+        }
+        if (data.turnPaths) {
+          setTurnPaths(data.turnPaths);
+        }
+        message.success({ 
+          content: response.message || `已识别 ${data.intersections?.length || data.length || 0} 个交叉点`, 
+          key: 'intersection' 
+        });
         await loadSessionStatus();
       }
     } catch (error: any) {
@@ -649,6 +680,41 @@ const GPSMapping: React.FC = () => {
       ctx.fill();
     });
 
+    // 绘制转弯路线
+    turnPaths.forEach(turnPath => {
+      if (!turnPath.points || turnPath.points.length < 2) return;
+
+      // 根据转弯方向选择颜色
+      let color = '#13c2c2'; // 默认青色
+      switch (turnPath.direction) {
+        case 'left':
+          color = '#52c41a'; // 绿色
+          break;
+        case 'right':
+          color = '#1890ff'; // 蓝色
+          break;
+        case 'uturn':
+          color = '#fa8c16'; // 橙色
+          break;
+        case 'straight':
+          color = '#8c8c8c'; // 灰色
+          break;
+      }
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 2]); // 虚线
+      ctx.beginPath();
+      turnPath.points.forEach((pt, i) => {
+        const screenX = originScreenX + pt.mapXy.x * scale;
+        const screenY = originScreenY - pt.mapXy.y * scale;
+        if (i === 0) ctx.moveTo(screenX, screenY);
+        else ctx.lineTo(screenX, screenY);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]); // 重置为实线
+    });
+
     // 绘制梁位
     beamPositions.forEach(beam => {
       const screenX = originScreenX + beam.center.x * scale;
@@ -670,32 +736,52 @@ const GPSMapping: React.FC = () => {
       ctx.fillText(beam.name, screenX, screenY + 5);
     });
 
-    // 绘制当前位置
+    // 绘制当前位置（带节流）
     if (gpsData && origin) {
-      gpsMappingApi.convertGPSToMap(gpsData.latitude, gpsData.longitude).then(response => {
-        if (response.success && response.data) {
-          const screenX = originScreenX + response.data.x * scale;
-          const screenY = originScreenY - response.data.y * scale;
+      const lat = gpsData.latitude;
+      const lon = gpsData.longitude;
+      
+      // 检查是否需要重新转换（节流逻辑）
+      const needConvert = !lastConvertedGpsRef.current || 
+        Math.abs(lat - lastConvertedGpsRef.current.lat) > GPS_THRESHOLD ||
+        Math.abs(lon - lastConvertedGpsRef.current.lon) > GPS_THRESHOLD;
+      
+      const drawCurrentPosition = (mapX: number, mapY: number) => {
+        const screenX = originScreenX + mapX * scale;
+        const screenY = originScreenY - mapY * scale;
 
-          ctx.fillStyle = '#ff4d4f';
+        ctx.fillStyle = '#ff4d4f';
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, 12, 0, 2 * Math.PI);
+        ctx.fill();
+
+        if (gpsData.heading !== undefined) {
+          const headingRad = (gpsData.heading - 90) * Math.PI / 180;
+          ctx.strokeStyle = '#ff4d4f';
+          ctx.lineWidth = 3;
           ctx.beginPath();
-          ctx.arc(screenX, screenY, 12, 0, 2 * Math.PI);
-          ctx.fill();
-
-          if (gpsData.heading !== undefined) {
-            const headingRad = (gpsData.heading - 90) * Math.PI / 180;
-            ctx.strokeStyle = '#ff4d4f';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(screenX, screenY);
-            ctx.lineTo(
-              screenX + 25 * Math.cos(headingRad),
-              screenY + 25 * Math.sin(headingRad)
-            );
-            ctx.stroke();
-          }
+          ctx.moveTo(screenX, screenY);
+          ctx.lineTo(
+            screenX + 25 * Math.cos(headingRad),
+            screenY + 25 * Math.sin(headingRad)
+          );
+          ctx.stroke();
         }
-      });
+      };
+      
+      if (needConvert) {
+        // 需要转换时才调用 API
+        gpsMappingApi.convertGPSToMap(lat, lon).then(response => {
+          if (response.success && response.data) {
+            // 缓存转换结果
+            lastConvertedGpsRef.current = { lat, lon, x: response.data.x, y: response.data.y };
+            drawCurrentPosition(response.data.x, response.data.y);
+          }
+        });
+      } else if (lastConvertedGpsRef.current) {
+        // 使用缓存的结果绘制
+        drawCurrentPosition(lastConvertedGpsRef.current.x, lastConvertedGpsRef.current.y);
+      }
     }
   };
 
@@ -1001,6 +1087,9 @@ const GPSMapping: React.FC = () => {
                 <Statistic title="交叉点" value={intersections.length} />
               </Col>
               <Col span={12}>
+                <Statistic title="转弯路线" value={turnPaths.length} />
+              </Col>
+              <Col span={12}>
                 <Statistic title="梁位数" value={beamPositions.length} />
               </Col>
               <Col span={12}>
@@ -1075,12 +1164,13 @@ const GPSMapping: React.FC = () => {
 
             {/* 图例 */}
             <div style={{ marginTop: 16, padding: 16, background: '#fafafa', borderRadius: 4 }}>
-              <Space size="large">
+              <Space size="large" wrap>
                 <span><span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: '#1890ff', marginRight: 8 }} />补给站</span>
                 <span><span style={{ display: 'inline-block', width: 20, height: 4, background: '#52c41a', marginRight: 8 }} />首选路网</span>
                 <span><span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: '#722ed1', marginRight: 8 }} />交叉点</span>
                 <span><span style={{ display: 'inline-block', width: 12, height: 12, background: 'rgba(24, 144, 255, 0.3)', border: '1px solid #1890ff', marginRight: 8 }} />梁位</span>
                 <span><span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: '#ff4d4f', marginRight: 8 }} />当前位置</span>
+                <span><span style={{ display: 'inline-block', width: 20, height: 2, background: '#13c2c2', marginRight: 8 }} />转弯路线</span>
               </Space>
             </div>
           </Card>

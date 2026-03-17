@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Menu, Button, Avatar, Dropdown, message, Tag, Tooltip } from 'antd';
+import { Layout, Menu, Button, Avatar, Dropdown, message, Tooltip } from 'antd';
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -14,9 +14,7 @@ import {
   MonitorOutlined,
   ExclamationCircleOutlined,
   ReloadOutlined,
-  BranchesOutlined,
   EnvironmentOutlined,
-  GlobalOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -34,15 +32,6 @@ interface MainLayoutProps {
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const [collapsed, setCollapsed] = useState(false);
   const [emergencyActive, setEmergencyActive] = useState(false);
-  // GPS状态
-  const [gpsStatus, setGpsStatus] = useState<{
-    quality: number;
-    satellites: number;
-    isFixed: boolean;
-  } | null>(null);
-  // 电池和水位状态
-  const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
-  const [waterLevel, setWaterLevel] = useState<number | null>(null);
   
   const navigate = useNavigate();
   const location = useLocation();
@@ -60,55 +49,11 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       type: 'std_msgs/msg/Bool'
     });
     
-    // 订阅GPS质量（直接获取RTK质量值）
-    socketService.sendRosCommand({
-      op: 'subscribe',
-      topic: '/gps/quality',
-      type: 'std_msgs/Int8'
-    });
-    
-    // 订阅GPS状态（JSON格式，获取卫星数）
-    socketService.sendRosCommand({
-      op: 'subscribe',
-      topic: '/gps/status',
-      type: 'std_msgs/String'
-    });
-    
-    // 订阅电池状态
-    socketService.sendRosCommand({
-      op: 'subscribe',
-      topic: '/battery_level',
-      type: 'std_msgs/msg/Float32'
-    });
-    
-    // 订阅水位状态
-    socketService.sendRosCommand({
-      op: 'subscribe',
-      topic: '/water_level',
-      type: 'std_msgs/msg/Float32'
-    });
-    
     return () => {
       // 取消订阅
       socketService.sendRosCommand({
         op: 'unsubscribe',
         topic: '/emergency_stop_status'
-      });
-      socketService.sendRosCommand({
-        op: 'unsubscribe',
-        topic: '/gps/quality'
-      });
-      socketService.sendRosCommand({
-        op: 'unsubscribe',
-        topic: '/gps/status'
-      });
-      socketService.sendRosCommand({
-        op: 'unsubscribe',
-        topic: '/battery_level'
-      });
-      socketService.sendRosCommand({
-        op: 'unsubscribe',
-        topic: '/water_level'
       });
       socketService.disconnect();
     };
@@ -120,33 +65,6 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       if (data.topic === '/emergency_stop_status') {
         const isActive = data.msg.data;
         setEmergencyActive(isActive);
-      } else if (data.topic === '/gps/quality') {
-        // GPS质量（直接从 /gps/quality 话题获取，这是最准确的RTK质量值）
-        const quality = data.msg.data ?? data.msg ?? 0;
-        setGpsStatus(prev => ({
-          quality: quality,
-          satellites: prev?.satellites ?? 0,
-          isFixed: quality === 4 || quality === 5  // RTK Fixed=4, RTK Float=5
-        }));
-      } else if (data.topic === '/gps/status') {
-        // GPS状态（JSON格式，获取卫星数）
-        try {
-          const statusStr = data.msg.data || data.msg;
-          const status = typeof statusStr === 'string' ? JSON.parse(statusStr) : statusStr;
-          const satellites = status.satellites || 0;
-          // 不覆盖 quality，因为 /gps/quality 话题的值更准确
-          setGpsStatus(prev => ({
-            quality: prev?.quality ?? status.quality ?? 0,
-            satellites: satellites,
-            isFixed: prev?.quality === 4 || prev?.quality === 5
-          }));
-        } catch (e) {
-          console.error('Failed to parse GPS status:', e);
-        }
-      } else if (data.topic === '/battery_level') {
-        setBatteryLevel(data.msg.data);
-      } else if (data.topic === '/water_level') {
-        setWaterLevel(data.msg.data);
       }
     });
   }, []);
@@ -312,37 +230,6 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             style={{ fontSize: '16px', width: 64, height: 64 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            {/* GPS状态 */}
-            <Tooltip title={gpsStatus ? `GPS状态: ${gpsStatus.isFixed ? 'RTK固定解' : '未定位'} | 卫星数: ${gpsStatus.satellites}` : '等待GPS数据'}>
-              <Tag 
-                icon={<GlobalOutlined />}
-                color={gpsStatus?.isFixed ? 'success' : 'error'}
-                style={{ margin: 0, padding: '4px 8px', fontSize: '13px' }}
-              >
-                GPS: {gpsStatus?.isFixed ? 'FIXED' : '未定位'}
-              </Tag>
-            </Tooltip>
-            
-            {/* 电池状态 */}
-            <Tooltip title={`电池电量: ${batteryLevel !== null ? batteryLevel.toFixed(0) + '%' : '未知'}`}>
-              <Tag 
-                color={batteryLevel === null ? 'default' : batteryLevel > 50 ? 'success' : batteryLevel > 20 ? 'warning' : 'error'}
-                style={{ margin: 0, padding: '4px 8px', fontSize: '13px' }}
-              >
-                电量: {batteryLevel !== null ? batteryLevel.toFixed(0) + '%' : '--'}
-              </Tag>
-            </Tooltip>
-            
-            {/* 水位状态 */}
-            <Tooltip title={`水箱水位: ${waterLevel !== null ? waterLevel.toFixed(0) + '%' : '未知'}`}>
-              <Tag 
-                color={waterLevel === null ? 'default' : waterLevel > 50 ? 'success' : waterLevel > 20 ? 'warning' : 'error'}
-                style={{ margin: 0, padding: '4px 8px', fontSize: '13px' }}
-              >
-                水位: {waterLevel !== null ? waterLevel.toFixed(0) + '%' : '--'}
-              </Tag>
-            </Tooltip>
-            
             {/* 紧急停止按钮 */}
             <Button
               type="primary"

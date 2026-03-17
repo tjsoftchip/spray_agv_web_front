@@ -105,23 +105,22 @@ const SupplyManagement: React.FC = () => {
     
     initializeData();
 
-    const interval = setInterval(() => {
-      if (relayStatus?.connected) {
+    // 合并定时器：根据设备状态动态调整轮询间隔
+    // 在线设备每30秒轮询，离线设备每60秒轮询
+    const statusCheckInterval = setInterval(() => {
+      const relayOnline = relayStatus?.connected;
+      const chargingOnline = chargingStatus?.connected;
+      
+      // 只在需要时才发起请求
+      if (relayOnline || chargingOnline) {
+        if (relayOnline) loadRelayStatus();
+        if (chargingOnline) loadChargingStatus();
+      } else {
+        // 离线状态也尝试重连
         loadRelayStatus();
-      }
-      if (chargingStatus?.connected) {
         loadChargingStatus();
       }
-    }, 15000);
-
-    const offlineInterval = setInterval(() => {
-      if (!relayStatus?.connected) {
-        loadRelayStatus();
-      }
-      if (!chargingStatus?.connected) {
-        loadChargingStatus();
-      }
-    }, 30000);
+    }, 30000); // 统一使用30秒间隔
 
     socketService.on('ros_message', (data) => {
       if (data.topic === '/supply_status') {
@@ -142,8 +141,7 @@ const SupplyManagement: React.FC = () => {
 
     return () => {
       socketService.off('ros_message');
-      clearInterval(interval);
-      clearInterval(offlineInterval);
+      clearInterval(statusCheckInterval);
     };
   }, [relayStatus?.connected, chargingStatus?.connected]);
 

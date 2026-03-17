@@ -48,7 +48,6 @@ const SystemMonitor: React.FC = () => {
     try {
       setLoading(true);
       const response = await systemApi.getSystemStatus();
-      console.log('API Response:', response);
       setSystemStatus(response);
     } catch (error) {
       console.error('Failed to fetch system status:', error);
@@ -98,7 +97,6 @@ const SystemMonitor: React.FC = () => {
 
   // 组件挂载时获取状态
   useEffect(() => {
-    console.log('SystemMonitor component mounted');
     fetchSystemStatus();
     // 设置定时刷新
     const interval = setInterval(fetchSystemStatus, 10000);
@@ -106,11 +104,9 @@ const SystemMonitor: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    console.log('SystemMonitor systemStatus updated:', systemStatus);
   }, [systemStatus]);
 
   if (!systemStatus) {
-    console.log('SystemMonitor: No systemStatus, showing loading');
     return (
       <div style={{ padding: '24px', textAlign: 'center' }}>
         <Spin size="large" />
@@ -119,7 +115,6 @@ const SystemMonitor: React.FC = () => {
     );
   }
 
-  console.log('SystemMonitor: Rendering with systemStatus:', systemStatus);
 
   // 基础服务状态表格
   const basicServicesColumns = [

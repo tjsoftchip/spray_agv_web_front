@@ -90,28 +90,17 @@ const RealTimeMonitor: React.FC = () => {
             y: position.y || 0
           });
         }
-        
-        // 添加调试日志
-        console.log('Odom data received:', {
-          linearVel,
-          angularVel,
-          rawSpeed,
-          filteredSpeed,
-          position: position ? { x: position.x, y: position.y } : null
-        });
+        // 生产环境移除高频日志
       }
     };
 
     socketService.onRosMessage(handleRosMessage);
     subscribeToOdom();
 
-    const interval = setInterval(() => {
-      setBatteryLevel((prev) => Math.max(0, prev - 0.1));
-      setWaterLevel((prev) => Math.max(0, prev - 0.15));
-    }, 1000);
+    // 注意：电池和水位数据现在通过 WebSocket 实时获取，不再需要模拟定时器
+    // 如果需要演示模式，可以通过 props 或配置启用
 
     return () => {
-      clearInterval(interval);
       
       // 安全地清理 ECharts 实例
       try {
