@@ -154,6 +154,9 @@ const GPSMapping: React.FC = () => {
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentRoadIdRef = useRef<string | null>(null);
   
+  // GPS数据ref - 解决setInterval闭包问题
+  const gpsDataRef = useRef<GPSData | null>(null);
+  
   // GPS 坐标转换节流 - 缓存上次转换结果
   const lastConvertedGpsRef = useRef<{ lat: number; lon: number; x: number; y: number } | null>(null);
   const GPS_THRESHOLD = 0.00001; // 约1米的经纬度变化阈值
@@ -172,22 +175,44 @@ const GPSMapping: React.FC = () => {
   const initConnection = () => {
     socketService.connect();
 
+    // 订阅GPS话题（使用BEST_EFFORT QoS匹配rtk_gps_node发布者）
     socketService.sendRosCommand({
       op: 'subscribe',
       topic: '/gps/fix',
-      type: 'sensor_msgs/NavSatFix'
+      type: 'sensor_msgs/NavSatFix',
+      options: {
+        qos: {
+          reliability: { type: 'best_effort' }
+        }
+      }
     });
 
     socketService.sendRosCommand({
       op: 'subscribe',
       topic: '/gps/quality',
-      type: 'std_msgs/Int8'
+      type: 'std_msgs/Int8',
+      options: {
+        qos: {
+          reliability: { type: 'best_effort' }
+        }
+      }
     });
 
     socketService.sendRosCommand({
       op: 'subscribe',
       topic: '/gps/status',
       type: 'std_msgs/String'
+    });
+
+    socketService.sendRosCommand({
+      op: 'subscribe',
+      topic: '/gps/heading',
+      type: 'std_msgs/Float64',
+      options: {
+        qos: {
+          reliability: { type: 'best_effort' }
+        }
+      }
     });
 
     socketService.on('ros_message', handleGPSMessage);
@@ -198,6 +223,7 @@ const GPSMapping: React.FC = () => {
     socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/fix' });
     socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/quality' });
     socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/status' });
+    socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/heading' });
 
     if (recordingIntervalRef.current) {
       clearInterval(recordingIntervalRef.current);
@@ -207,34 +233,46 @@ const GPSMapping: React.FC = () => {
   // 处理GPS消息
   const handleGPSMessage = useCallback((data: any) => {
     if (data.topic === '/gps/fix') {
-      setGpsData(prev => ({
-        ...prev,
+      // 调试：每10次打印一次GPS数据
+      if (!window._gpsDebugCount) window._gpsDebugCount = 0;
+      window._gpsDebugCount++;
+      if (window._gpsDebugCount % 10 === 1) {
+        console.log('[GPS] 收到GPS数据:', data.msg.latitude?.toFixed(7), data.msg.longitude?.toFixed(7));
+      }
+      const newGpsData = {
+        ...gpsDataRef.current,
         latitude: data.msg.latitude,
         longitude: data.msg.longitude,
         altitude: data.msg.altitude,
         timestamp: Date.now()
-      } as GPSData));
+      } as GPSData;
+      gpsDataRef.current = newGpsData;  // 更新ref
+      setGpsData(newGpsData);
       setGpsConnected(true);
     } else if (data.topic === '/gps/quality') {
-      setGpsData(prev => ({
-        ...prev,
+      const newGpsData = {
+        ...gpsDataRef.current,
         quality: data.msg.data || data.msg.quality,
-        satellites: data.msg.satellites || prev?.satellites || 0,
-        hdop: data.msg.hdop || prev?.hdop || 0,
-        heading: data.msg.heading || prev?.heading || 0,
-        speed: data.msg.speed || prev?.speed || 0
-      } as GPSData));
+        satellites: data.msg.satellites || gpsDataRef.current?.satellites || 0,
+        hdop: data.msg.hdop || gpsDataRef.current?.hdop || 0,
+        heading: data.msg.heading || gpsDataRef.current?.heading || 0,
+        speed: data.msg.speed || gpsDataRef.current?.speed || 0
+      } as GPSData;
+      gpsDataRef.current = newGpsData;  // 更新ref
+      setGpsData(newGpsData);
     } else if (data.topic === '/gps/status') {
       try {
         const statusStr = data.msg.data || data.msg;
         const status = typeof statusStr === 'string' ? JSON.parse(statusStr) : statusStr;
-        setGpsData(prev => ({
-          ...prev,
+        const newGpsData = {
+          ...gpsDataRef.current,
           quality: status.quality || 0,
           satellites: status.satellites || 0,
           hdop: status.hdop || 99,
           timestamp: Date.now()
-        } as GPSData));
+        } as GPSData;
+        gpsDataRef.current = newGpsData;  // 更新ref
+        setGpsData(newGpsData);
       } catch (e) {
         console.error('Failed to parse GPS status:', e);
       }
@@ -377,8 +415,10 @@ const GPSMapping: React.FC = () => {
 
         // 启动定时上报GPS点
         recordingIntervalRef.current = setInterval(() => {
-          if (gpsData && gpsData.quality >= 4 && currentRoadIdRef.current) {
-            recordCurrentGPSPoint(currentRoadIdRef.current);
+          // 使用 ref 获取最新 GPS 数据（解决闭包问题）
+          const currentGpsData = gpsDataRef.current;
+          if (currentGpsData && currentGpsData.quality >= 4 && currentRoadIdRef.current) {
+            recordCurrentGPSPoint(currentRoadIdRef.current, currentGpsData);
           }
         }, 1000);
       }
@@ -387,14 +427,14 @@ const GPSMapping: React.FC = () => {
     }
   };
 
-  const recordCurrentGPSPoint = async (roadId: string) => {
-    if (!gpsData) return;
+  const recordCurrentGPSPoint = async (roadId: string, gpsPoint: GPSData | null) => {
+    if (!gpsPoint) return;
 
     try {
       await gpsMappingApi.recordRoadPoint(roadId, {
-        latitude: gpsData.latitude,
-        longitude: gpsData.longitude,
-        altitude: gpsData.altitude
+        latitude: gpsPoint.latitude,
+        longitude: gpsPoint.longitude,
+        altitude: gpsPoint.altitude
       });
 
       // 更新当前道路的点数

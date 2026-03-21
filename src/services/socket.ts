@@ -7,18 +7,14 @@ const getWsUrl = (): string => {
     return envUrl;
   }
   
-  // 动态使用当前页面的主机地址
-  // 这样无论后端运行在哪个 IP 上，前端都能自动适应
-  const hostname = window.location.hostname;
-  const backendPort = '3000';
-  
-  // 开发环境：使用 HTTP 协议
+  // 开发环境：通过 Vite 代理连接后端
+  // 使用当前页面的 origin（通过 Vite 代理转发 socket.io）
   if (import.meta.env.DEV) {
-    return `http://${hostname}:${backendPort}`;
+    return window.location.origin;  // 使用当前页面地址，通过 Vite 代理
   }
   
-  // 生产环境：使用当前页面的协议
-  return `${window.location.protocol}//${hostname}:${backendPort}`;
+  // 生产环境：使用当前页面的地址 + 3000端口
+  return `${window.location.protocol}//${window.location.hostname}:3000`;
 };
 
 const WS_URL = getWsUrl();
