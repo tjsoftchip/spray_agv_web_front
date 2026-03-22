@@ -323,15 +323,16 @@ const StatusMonitor: React.FC = () => {
           // 尝试解析JSON格式的状态数据
           const statusStr = data.msg.data || data.msg;
           const status = typeof statusStr === 'string' ? JSON.parse(statusStr) : statusStr;
+          const statusQuality = parseInt(status.quality) || 0;
           
           setGpsStatus(prev => ({
-            quality: prev?.quality ?? status.quality ?? 0,  // 优先使用 /gps/quality 的值
+            quality: statusQuality,  // 直接使用 /gps/status 中的 quality 值
             satellites: status.satellites || 0,
             hdop: status.hdop || 99.99,
             latitude: prev?.latitude ?? 0,
             longitude: prev?.longitude ?? 0,
             altitude: prev?.altitude ?? 0,
-            isFixed: prev?.quality === 4 || prev?.quality === 5
+            isFixed: statusQuality === 4 || statusQuality === 5  // 用当前quality判断
           }));
         } catch (e) {
           console.error('Failed to parse GPS status:', e);
@@ -433,19 +434,29 @@ const StatusMonitor: React.FC = () => {
       });
     };
 
-    // 订阅GPS数据
+    // 订阅GPS数据（使用BEST_EFFORT QoS匹配rtk_gps_node发布者）
     const subscribeToGPS = () => {
       socketService.sendRosCommand({
         op: 'subscribe',
         topic: '/gps/fix',
-        type: 'sensor_msgs/NavSatFix'
+        type: 'sensor_msgs/NavSatFix',
+        options: {
+          qos: {
+            reliability: { type: 'best_effort' }
+          }
+        }
       });
 
       // 订阅GPS质量（直接获取RTK质量值）
       socketService.sendRosCommand({
         op: 'subscribe',
         topic: '/gps/quality',
-        type: 'std_msgs/Int8'
+        type: 'std_msgs/Int8',
+        options: {
+          qos: {
+            reliability: { type: 'best_effort' }
+          }
+        }
       });
 
       // 订阅GPS状态（JSON格式，包含卫星数和HDOP）
