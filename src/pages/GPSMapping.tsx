@@ -18,7 +18,7 @@ import {
   SaveOutlined, ReloadOutlined, DeleteOutlined, PlusOutlined,
   AimOutlined, CarOutlined, BorderOutlined, FileImageOutlined,
   ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined,
-  NodeIndexOutlined
+  NodeIndexOutlined, LeftOutlined, RollbackOutlined
 } from '@ant-design/icons';
 import GPSStatusCard from '../components/GPSStatusCard';
 import { socketService } from '../services/socket';
@@ -84,6 +84,33 @@ interface TurnPath {
   }>;
 }
 
+// V3.0新增：转弯圆弧
+interface TurnArc {
+  id: string;
+  intersectionId: string;
+  quadrant: number;  // 0-3，四个象限
+  radius: number;    // 转弯半径（米）
+  center: { x: number; y: number };  // 圆弧中心
+  tangentPoints: Array<{ x: number; y: number }>;  // 切点位置
+  points: Array<{
+    seq: number;
+    gps: { latitude: number; longitude: number; altitude: number };
+    mapXy: { x: number; y: number };
+  }>;
+}
+
+// V3.0新增：直行线路
+interface StraightPath {
+  id: string;
+  intersectionId: string;
+  roadId: string;
+  points: Array<{
+    seq: number;
+    gps: { latitude: number; longitude: number; altitude: number };
+    mapXy: { x: number; y: number };
+  }>;
+}
+
 interface BeamPosition {
   id: string;
   name: string;
@@ -113,6 +140,19 @@ const GPSMapping: React.FC = () => {
   // 建图步骤
   const [currentStep, setCurrentStep] = useState(0);
 
+  // 步骤历史快照 - 用于回退功能
+  const [stepSnapshots, setStepSnapshots] = useState<{
+    [key: number]: {
+      origin: typeof origin extends infer T | undefined ? T : never;
+      roads: Road[];
+      intersections: Intersection[];
+      turnPaths: TurnPath[];
+      turnArcs: TurnArc[];
+      straightPaths: StraightPath[];
+      beamPositions: BeamPosition[];
+    };
+  }>({});
+
   // 建图会话
   const [session, setSession] = useState<MappingSession | null>(null);
 
@@ -130,6 +170,8 @@ const GPSMapping: React.FC = () => {
   // 交叉点和梁位
   const [intersections, setIntersections] = useState<Intersection[]>([]);
   const [turnPaths, setTurnPaths] = useState<TurnPath[]>([]);
+  const [turnArcs, setTurnArcs] = useState<TurnArc[]>([]);  // V3.0新增
+  const [straightPaths, setStraightPaths] = useState<StraightPath[]>([]);  // V3.0新增
   const [beamPositions, setBeamPositions] = useState<BeamPosition[]>([]);
 
   // 地图视图
@@ -160,6 +202,57 @@ const GPSMapping: React.FC = () => {
   // GPS 坐标转换节流 - 缓存上次转换结果
   const lastConvertedGpsRef = useRef<{ lat: number; lon: number; x: number; y: number } | null>(null);
   const GPS_THRESHOLD = 0.00001; // 约1米的经纬度变化阈值
+
+  // ==================== 步骤回退功能 ====================
+
+  // 保存当前步骤的状态快照（在进入下一步之前调用）
+  const saveStepSnapshot = useCallback((step: number) => {
+    setStepSnapshots(prev => ({
+      ...prev,
+      [step]: {
+        origin: origin ? { ...origin } : null,
+        roads: roads.map(r => ({ ...r, points: r.points ? [...r.points] : [] })),
+        intersections: intersections.map(i => ({ ...i })),
+        turnPaths: turnPaths.map(t => ({ ...t, points: t.points ? [...t.points] : [] })),
+        turnArcs: turnArcs.map(a => ({ ...a, points: a.points ? [...a.points] : [], tangentPoints: a.tangentPoints ? [...a.tangentPoints] : [] })),
+        straightPaths: straightPaths.map(s => ({ ...s, points: s.points ? [...s.points] : [] })),
+        beamPositions: beamPositions.map(b => ({ ...b }))
+      }
+    }));
+  }, [origin, roads, intersections, turnPaths, turnArcs, straightPaths, beamPositions]);
+
+  // 回退到上一步
+  const goToPrevStep = useCallback(() => {
+    if (currentStep <= 0) return;
+
+    const prevStep = currentStep - 1;
+    const snapshot = stepSnapshots[prevStep];
+
+    if (snapshot) {
+      // 恢复快照状态
+      if (snapshot.origin) {
+        setOrigin({ ...snapshot.origin });
+      }
+      setRoads(snapshot.roads.map(r => ({ ...r })));
+      setIntersections(snapshot.intersections.map(i => ({ ...i })));
+      setTurnPaths(snapshot.turnPaths.map(t => ({ ...t })));
+      setTurnArcs(snapshot.turnArcs?.map(a => ({ ...a })) || []);
+      setStraightPaths(snapshot.straightPaths?.map(s => ({ ...s })) || []);
+      setBeamPositions(snapshot.beamPositions.map(b => ({ ...b })));
+    }
+
+    // 切换到上一步
+    setCurrentStep(prevStep);
+    message.info(`已返回到第 ${prevStep + 1} 步`);
+  }, [currentStep, stepSnapshots]);
+
+  // 进入下一步（带快照保存）
+  const goToNextStep = useCallback((nextStep: number) => {
+    // 保存当前步骤的快照
+    saveStepSnapshot(currentStep);
+    // 进入下一步
+    setCurrentStep(nextStep);
+  }, [currentStep, saveStepSnapshot]);
 
   // ==================== 初始化 ====================
 
@@ -233,30 +326,36 @@ const GPSMapping: React.FC = () => {
   // 处理GPS消息
   const handleGPSMessage = useCallback((data: any) => {
     if (data.topic === '/gps/fix') {
+      // 确保GPS数据是数字类型（ROS2可能传递字符串）
+      const latitude = parseFloat(data.msg.latitude);
+      const longitude = parseFloat(data.msg.longitude);
+      const altitude = parseFloat(data.msg.altitude) || 0;
+      
       // 调试：每10次打印一次GPS数据
       if (!window._gpsDebugCount) window._gpsDebugCount = 0;
       window._gpsDebugCount++;
       if (window._gpsDebugCount % 10 === 1) {
-        console.log('[GPS] 收到GPS数据:', data.msg.latitude?.toFixed(7), data.msg.longitude?.toFixed(7));
+        console.log('[GPS] 收到GPS数据:', latitude?.toFixed(7), longitude?.toFixed(7));
       }
       const newGpsData = {
         ...gpsDataRef.current,
-        latitude: data.msg.latitude,
-        longitude: data.msg.longitude,
-        altitude: data.msg.altitude,
+        latitude,
+        longitude,
+        altitude,
         timestamp: Date.now()
       } as GPSData;
       gpsDataRef.current = newGpsData;  // 更新ref
       setGpsData(newGpsData);
       setGpsConnected(true);
     } else if (data.topic === '/gps/quality') {
+      const quality = parseInt(data.msg.data || data.msg.quality) || 0;
       const newGpsData = {
         ...gpsDataRef.current,
-        quality: data.msg.data || data.msg.quality,
-        satellites: data.msg.satellites || gpsDataRef.current?.satellites || 0,
-        hdop: data.msg.hdop || gpsDataRef.current?.hdop || 0,
-        heading: data.msg.heading || gpsDataRef.current?.heading || 0,
-        speed: data.msg.speed || gpsDataRef.current?.speed || 0
+        quality,
+        satellites: parseInt(data.msg.satellites) || gpsDataRef.current?.satellites || 0,
+        hdop: parseFloat(data.msg.hdop) || gpsDataRef.current?.hdop || 0,
+        heading: parseFloat(data.msg.heading) || gpsDataRef.current?.heading || 0,
+        speed: parseFloat(data.msg.speed) || gpsDataRef.current?.speed || 0
       } as GPSData;
       gpsDataRef.current = newGpsData;  // 更新ref
       setGpsData(newGpsData);
@@ -266,9 +365,9 @@ const GPSMapping: React.FC = () => {
         const status = typeof statusStr === 'string' ? JSON.parse(statusStr) : statusStr;
         const newGpsData = {
           ...gpsDataRef.current,
-          quality: status.quality || 0,
-          satellites: status.satellites || 0,
-          hdop: status.hdop || 99,
+          quality: parseInt(status.quality) || 0,
+          satellites: parseInt(status.satellites) || 0,
+          hdop: parseFloat(status.hdop) || 99,
           timestamp: Date.now()
         } as GPSData;
         gpsDataRef.current = newGpsData;  // 更新ref
@@ -285,6 +384,14 @@ const GPSMapping: React.FC = () => {
       const response = await gpsMappingApi.getMappingStatus();
       if (response.success && response.data) {
         setSession(response.data);
+
+        // V3.0新增：加载turnArcs和straightPaths数据
+        if (response.data.turnArcs) {
+          setTurnArcs(response.data.turnArcs);
+        }
+        if (response.data.straightPaths) {
+          setStraightPaths(response.data.straightPaths);
+        }
 
         if (response.data.status === 'completed') {
           setCurrentStep(4);
@@ -428,24 +535,44 @@ const GPSMapping: React.FC = () => {
   };
 
   const recordCurrentGPSPoint = async (roadId: string, gpsPoint: GPSData | null) => {
-    if (!gpsPoint) return;
+    if (!gpsPoint) {
+      return;
+    }
+
+    // 验证GPS数据有效性
+    if (isNaN(gpsPoint.latitude) || isNaN(gpsPoint.longitude)) {
+      console.warn('[GPS建图] GPS坐标无效，跳过记录');
+      return;
+    }
+
+    // 调试：打印实际发送的GPS数据
+    if (!window._gpsRecordCount) window._gpsRecordCount = 0;
+    window._gpsRecordCount++;
+    if (window._gpsRecordCount % 10 === 1) {
+      console.log(`[GPS建图] 发送道路点 #${window._gpsRecordCount}:`, 
+        gpsPoint.latitude?.toFixed(7), gpsPoint.longitude?.toFixed(7));
+    }
 
     try {
       await gpsMappingApi.recordRoadPoint(roadId, {
         latitude: gpsPoint.latitude,
         longitude: gpsPoint.longitude,
-        altitude: gpsPoint.altitude
+        altitude: gpsPoint.altitude || 0
       });
 
       // 更新当前道路的点数
       setCurrentRoad(prev => prev ? { ...prev, pointCount: (prev.pointCount || 0) + 1 } : null);
-    } catch (error) {
-      console.error('记录道路点失败:', error);
+    } catch (error: any) {
+      // 静默处理400错误（无效GPS坐标）
+      if (error?.response?.status !== 400) {
+        console.error('记录道路点失败:', error);
+      }
     }
   };
 
   const endRoadRecording = async () => {
     try {
+      // 先停止定时器
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
         recordingIntervalRef.current = null;
@@ -454,19 +581,25 @@ const GPSMapping: React.FC = () => {
       const response = await gpsMappingApi.endRoadRecording();
       if (response.success) {
         message.success('道路采集完成');
-        setIsRecordingRoad(false);
-        setCurrentRoad(null);
-        currentRoadIdRef.current = null;
-        await loadRoads();
-        await loadSessionStatus();
       } else {
         message.warning(response.message || '道路点数不足');
-        setIsRecordingRoad(false);
-        setCurrentRoad(null);
-        currentRoadIdRef.current = null;
       }
-    } catch (error) {
-      message.error('结束道路采集失败');
+    } catch (error: any) {
+      // 即使后端报错，也清理前端状态
+      const errorMsg = error?.response?.data?.message || '结束道路采集失败';
+      if (errorMsg.includes('没有正在采集')) {
+        // 后端已经没有正在采集的道路，静默处理
+        console.log('道路采集已结束');
+      } else {
+        message.warning(errorMsg);
+      }
+    } finally {
+      // 无论成功还是失败，都清理前端状态
+      setIsRecordingRoad(false);
+      setCurrentRoad(null);
+      currentRoadIdRef.current = null;
+      await loadRoads();
+      await loadSessionStatus();
     }
   };
 
@@ -608,6 +741,10 @@ const GPSMapping: React.FC = () => {
             setIsRecordingRoad(false);
             setIntersections([]);
             setBeamPositions([]);
+            setTurnPaths([]);
+            setTurnArcs([]);  // V3.0新增
+            setStraightPaths([]);  // V3.0新增
+            setStepSnapshots({}); // 清除快照
             setCurrentStep(0);
             await loadSessionStatus();
           }
@@ -755,6 +892,50 @@ const GPSMapping: React.FC = () => {
       ctx.setLineDash([]); // 重置为实线
     });
 
+    // 绘制转弯圆弧（V3.0新增）- 四分之一圆弧
+    turnArcs.forEach(arc => {
+      if (!arc.points || arc.points.length < 2) return;
+
+      // 绘制圆弧路径
+      ctx.strokeStyle = '#ff6b6b'; // 红色
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      arc.points.forEach((pt, i) => {
+        const screenX = originScreenX + pt.mapXy.x * scale;
+        const screenY = originScreenY - pt.mapXy.y * scale;
+        if (i === 0) ctx.moveTo(screenX, screenY);
+        else ctx.lineTo(screenX, screenY);
+      });
+      ctx.stroke();
+
+      // 绘制圆弧中心点（小圆圈）
+      const centerScreenX = originScreenX + arc.center.x * scale;
+      const centerScreenY = originScreenY - arc.center.y * scale;
+      ctx.strokeStyle = '#ff6b6b';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(centerScreenX, centerScreenY, 3, 0, 2 * Math.PI);
+      ctx.stroke();
+    });
+
+    // 绘制直行线路（V3.0新增）
+    straightPaths.forEach(sp => {
+      if (!sp.points || sp.points.length < 2) return;
+
+      ctx.strokeStyle = '#722ed1'; // 紫色
+      ctx.lineWidth = 2;
+      ctx.setLineDash([2, 2]); // 虚线
+      ctx.beginPath();
+      sp.points.forEach((pt, i) => {
+        const screenX = originScreenX + pt.mapXy.x * scale;
+        const screenY = originScreenY - pt.mapXy.y * scale;
+        if (i === 0) ctx.moveTo(screenX, screenY);
+        else ctx.lineTo(screenX, screenY);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+
     // 绘制梁位
     beamPositions.forEach(beam => {
       const screenX = originScreenX + beam.center.x * scale;
@@ -868,6 +1049,29 @@ const GPSMapping: React.FC = () => {
       {/* 步骤指示器 */}
       <Card style={{ marginBottom: 16 }}>
         <Steps current={currentStep} items={steps.map(s => ({ title: s.title, icon: s.icon }))} />
+        {/* 回退按钮区域 */}
+        {currentStep > 0 && (
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <Space>
+              {currentStep > 1 && (
+                <Button 
+                  icon={<LeftOutlined />} 
+                  onClick={goToPrevStep}
+                >
+                  返回第{currentStep}步: {steps[currentStep - 1]?.title}
+                </Button>
+              )}
+              {currentStep === 1 && (
+                <Button 
+                  icon={<RollbackOutlined />} 
+                  onClick={goToPrevStep}
+                >
+                  返回原点校准
+                </Button>
+              )}
+            </Space>
+          </div>
+        )}
       </Card>
 
       <Row gutter={16}>
@@ -906,7 +1110,7 @@ const GPSMapping: React.FC = () => {
                       <Tag color="success">已校准</Tag>
                     </Descriptions.Item>
                   </Descriptions>
-                  <Button type="primary" block onClick={() => setCurrentStep(1)}>
+                  <Button type="primary" block onClick={() => goToNextStep(1)}>
                     下一步：开始道路采集
                   </Button>
                 </>
@@ -936,9 +1140,19 @@ const GPSMapping: React.FC = () => {
               size="small"
               style={{ marginBottom: 16 }}
               extra={
-                <Button size="small" onClick={() => { generateIntersections(); setCurrentStep(2); }} disabled={roads.length < 2}>
-                  下一步
-                </Button>
+                <Space>
+                  <Button size="small" onClick={goToPrevStep}>
+                    上一步
+                  </Button>
+                  <Button 
+                    size="small" 
+                    type="primary" 
+                    onClick={() => { saveStepSnapshot(1); generateIntersections(); setCurrentStep(2); }} 
+                    disabled={roads.length < 2}
+                  >
+                    下一步
+                  </Button>
+                </Space>
               }
             >
               {isRecordingRoad ? (
@@ -1013,9 +1227,19 @@ const GPSMapping: React.FC = () => {
               size="small"
               style={{ marginBottom: 16 }}
               extra={
-                <Button size="small" onClick={() => setCurrentStep(3)} disabled={beamPositions.length === 0}>
-                  下一步
-                </Button>
+                <Space>
+                  <Button size="small" onClick={goToPrevStep}>
+                    上一步
+                  </Button>
+                  <Button 
+                    size="small" 
+                    type="primary" 
+                    onClick={() => goToNextStep(3)} 
+                    disabled={beamPositions.length === 0}
+                  >
+                    下一步
+                  </Button>
+                </Space>
               }
             >
               <Space direction="vertical" style={{ width: '100%' }}>
@@ -1073,7 +1297,16 @@ const GPSMapping: React.FC = () => {
 
           {/* Step 3: 生成地图 */}
           {currentStep === 3 && (
-            <Card title="生成地图" size="small" style={{ marginBottom: 16 }}>
+            <Card 
+              title="生成地图" 
+              size="small" 
+              style={{ marginBottom: 16 }}
+              extra={
+                <Button size="small" onClick={goToPrevStep}>
+                  上一步
+                </Button>
+              }
+            >
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Alert
                   message="准备就绪"
@@ -1109,6 +1342,9 @@ const GPSMapping: React.FC = () => {
                 title="地图生成成功！"
                 subTitle="地图文件已保存到 maps/beam_field/ 目录"
                 extra={[
+                  <Button key="back" onClick={goToPrevStep}>
+                    返回修改
+                  </Button>,
                   <Button type="primary" key="new" onClick={resetMapping}>
                     新建地图
                   </Button>
@@ -1127,7 +1363,10 @@ const GPSMapping: React.FC = () => {
                 <Statistic title="交叉点" value={intersections.length} />
               </Col>
               <Col span={12}>
-                <Statistic title="转弯路线" value={turnPaths.length} />
+                <Statistic title="转弯圆弧" value={turnArcs.length} />
+              </Col>
+              <Col span={12}>
+                <Statistic title="直行线路" value={straightPaths.length} />
               </Col>
               <Col span={12}>
                 <Statistic title="梁位数" value={beamPositions.length} />
@@ -1210,7 +1449,8 @@ const GPSMapping: React.FC = () => {
                 <span><span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: '#722ed1', marginRight: 8 }} />交叉点</span>
                 <span><span style={{ display: 'inline-block', width: 12, height: 12, background: 'rgba(24, 144, 255, 0.3)', border: '1px solid #1890ff', marginRight: 8 }} />梁位</span>
                 <span><span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: '#ff4d4f', marginRight: 8 }} />当前位置</span>
-                <span><span style={{ display: 'inline-block', width: 20, height: 2, background: '#13c2c2', marginRight: 8 }} />转弯路线</span>
+                <span><span style={{ display: 'inline-block', width: 20, height: 2, background: '#eb2f96', marginRight: 8 }} />转弯圆弧</span>
+                <span><span style={{ display: 'inline-block', width: 20, height: 2, background: '#722ed1', marginRight: 8 }} />直行线路</span>
               </Space>
             </div>
           </Card>
