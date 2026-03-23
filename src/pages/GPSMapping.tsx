@@ -60,6 +60,19 @@ interface Road {
   length?: number;
 }
 
+// V4.0扩展：交叉点相邻交点
+interface IntersectionNeighbors {
+  top?: string;
+  bottom?: string;
+  left?: string;
+  right?: string;
+  top_road_id?: string;
+  bottom_road_id?: string;
+  left_road_id?: string;
+  right_road_id?: string;
+}
+
+// V4.0扩展：交叉点数据
 interface Intersection {
   id: string;
   type: string;
@@ -67,7 +80,11 @@ interface Intersection {
     gps: { latitude: number; longitude: number; altitude: number };
     mapXy: { x: number; y: number };
   };
+  road_v_id?: string;           // 纵向道路ID（V4.0新增）
+  road_h_id?: string;           // 横向道路ID（V4.0新增）
   connectedRoads: string[];
+  neighbors?: IntersectionNeighbors;  // 四个方向的相邻交点（V4.0新增）
+  valid_quadrants?: number[];   // 有效象限列表（V4.0新增）
 }
 
 interface TurnPath {
@@ -84,7 +101,7 @@ interface TurnPath {
   }>;
 }
 
-// V3.0新增：转弯圆弧
+// V4.0扩展：转弯圆弧
 interface TurnArc {
   id: string;
   intersectionId: string;
@@ -97,6 +114,7 @@ interface TurnArc {
     gps: { latitude: number; longitude: number; altitude: number };
     mapXy: { x: number; y: number };
   }>;
+  beam_position_id?: string;  // 关联的梁位ID（V4.0新增）
 }
 
 // V3.0新增：直行线路
@@ -111,14 +129,36 @@ interface StraightPath {
   }>;
 }
 
+// V4.0扩展：梁位边界道路信息
+interface BeamBoundary {
+  road_id: string;
+  position: 'top' | 'bottom' | 'left' | 'right';
+}
+
+// V4.0扩展：梁位相邻梁位
+interface BeamNeighbors {
+  left?: string;
+  right?: string;
+  top?: string;
+  bottom?: string;
+}
+
+// V4.0扩展：梁位数据
 interface BeamPosition {
   id: string;
   name: string;
   row: string;
   col: number;
   center: { x: number; y: number };
-  boundaries: { north?: string; south?: string; east?: string; west?: string };
-  crossPoints: string[];
+  boundaries: {
+    north?: BeamBoundary | string;  // 兼容旧格式
+    south?: BeamBoundary | string;
+    east?: BeamBoundary | string;
+    west?: BeamBoundary | string;
+  };
+  corner_intersections?: string[];  // V4.0新增
+  crossPoints?: string[];           // 兼容旧字段名
+  neighbors?: BeamNeighbors;        // V4.0新增
 }
 
 interface MappingSession {
