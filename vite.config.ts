@@ -56,6 +56,15 @@ export default defineConfig({
         ws: true,
         secure: false,
         timeout: 30000,
+        rewriteWsOrigin: true,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            // 忽略 ECONNRESET 错误，这是正常的 WebSocket 断开重连
+            if (!err.message.includes('ECONNRESET')) {
+              console.log('WebSocket proxy error:', err.message);
+            }
+          });
+        },
       },
     },
   },

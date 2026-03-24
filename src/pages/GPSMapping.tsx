@@ -24,6 +24,14 @@ import GPSStatusCard from '../components/GPSStatusCard';
 import { socketService } from '../services/socket';
 import { gpsMappingApi } from '../services/gpsMappingApi';
 
+// 扩展Window类型声明
+declare global {
+  interface Window {
+    _gpsDebugCount?: number;
+    _gpsRecordCount?: number;
+  }
+}
+
 const { Option } = Select;
 const { Text } = { Text: (props: any) => <span {...props} /> };
 
