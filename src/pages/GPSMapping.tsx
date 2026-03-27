@@ -59,9 +59,8 @@ interface Road {
   name: string;
   type: 'longitudinal' | 'horizontal';
   params: {
-    preferredWidth: number;
-    keepoutDistance: number;
-    channelWidth: number;
+    preferredWidth: number;   // 首选网络宽度 (m)，默认1.4m
+    highCostWidth: number;    // 高代价区宽度 (m)，默认0.3m
   };
   points: RoadPoint[];
   pointCount?: number;
@@ -246,6 +245,10 @@ const GPSMapping: React.FC = () => {
   
   // GPS数据ref - 解决setInterval闭包问题
   const gpsDataRef = useRef<GPSData | null>(null);
+  
+  // GPS状态追踪（用于录制警告）
+  const lastFixedStateRef = useRef<boolean>(true);
+  const recordStatsRef = useRef({ attempted: 0, recorded: 0, lastLog: 0 });
   
   // GPS 坐标转换节流 - 缓存上次转换结果
   const lastConvertedGpsRef = useRef<{ lat: number; lon: number; x: number; y: number } | null>(null);
@@ -540,9 +543,8 @@ const GPSMapping: React.FC = () => {
     newRoadForm.setFieldsValue({
       type: 'longitudinal',
       name: '',
-      preferredWidth: 2.0,
-      keepoutDistance: 2.5,
-      channelWidth: 6.0
+      preferredWidth: 1.4,
+      highCostWidth: 0.3
     });
     setNewRoadModalVisible(true);
   };
@@ -556,8 +558,7 @@ const GPSMapping: React.FC = () => {
         type: values.type,
         params: {
           preferredWidth: values.preferredWidth,
-          keepoutDistance: values.keepoutDistance,
-          channelWidth: values.channelWidth
+          highCostWidth: values.highCostWidth
         }
       });
 
@@ -567,13 +568,41 @@ const GPSMapping: React.FC = () => {
         setIsRecordingRoad(true);
         setNewRoadModalVisible(false);
         message.success(`开始采集${values.type === 'longitudinal' ? '纵向' : '横向'}通道`);
+        
+        // 重置录制统计
+        recordStatsRef.current = { attempted: 0, recorded: 0, lastLog: 0 };
+        lastFixedStateRef.current = true;
 
         // 启动定时上报GPS点
         recordingIntervalRef.current = setInterval(() => {
           // 使用 ref 获取最新 GPS 数据（解决闭包问题）
           const currentGpsData = gpsDataRef.current;
-          if (currentGpsData && currentGpsData.quality >= 4 && currentRoadIdRef.current) {
-            recordCurrentGPSPoint(currentRoadIdRef.current, currentGpsData);
+          if (currentGpsData && currentRoadIdRef.current) {
+            recordStatsRef.current.attempted++;
+            
+            // 检查GPS状态变化
+            const isFixed = currentGpsData.quality >= 4;
+            if (lastFixedStateRef.current && !isFixed) {
+              // 从FIXED变为非FIXED，显示警告
+              console.warn(`[GPS建图] GPS状态丢失！quality=${currentGpsData.quality}，停止记录`);
+              message.warning(`GPS信号不稳定，当前状态: ${currentGpsData.quality}（需要4-FIXED）`);
+            } else if (!lastFixedStateRef.current && isFixed) {
+              // 从非FIXED恢复到FIXED
+              console.log('[GPS建图] GPS恢复FIXED状态');
+              message.success('GPS信号已恢复FIXED状态');
+            }
+            lastFixedStateRef.current = isFixed;
+            
+            if (isFixed) {
+              recordCurrentGPSPoint(currentRoadIdRef.current, currentGpsData);
+              recordStatsRef.current.recorded++;
+              
+              // 每10个点输出一次统计
+              if (recordStatsRef.current.recorded % 10 === 0) {
+                const stats = recordStatsRef.current;
+                console.log(`[GPS建图] 录制统计: 已记录${stats.recorded}个点 (尝试${stats.attempted}次, 成功率${((stats.recorded/stats.attempted)*100).toFixed(1)}%)`);
+              }
+            }
           }
         }, 1000);
       }
@@ -628,7 +657,11 @@ const GPSMapping: React.FC = () => {
 
       const response = await gpsMappingApi.endRoadRecording();
       if (response.success) {
-        message.success('道路采集完成');
+        // 显示录制统计
+        const stats = recordStatsRef.current;
+        const successRate = stats.attempted > 0 ? ((stats.recorded/stats.attempted)*100).toFixed(1) : 0;
+        message.success(`道路采集完成！记录了 ${stats.recorded} 个GPS点（成功率 ${successRate}%）`);
+        console.log(`[GPS建图] 录制完成统计: 记录${stats.recorded}个点, 尝试${stats.attempted}次, 成功率${successRate}%`);
       } else {
         message.warning(response.message || '道路点数不足');
       }
@@ -671,20 +704,23 @@ const GPSMapping: React.FC = () => {
       message.loading({ content: '正在识别交叉点和转弯路线...', key: 'intersection' });
       const response = await gpsMappingApi.generateIntersections();
       if (response.success) {
-        // 处理返回的数据（包含交叉点和转弯路线）
         const data = response.data;
         if (data.intersections) {
           setIntersections(data.intersections);
-        } else if (Array.isArray(data)) {
-          setIntersections(data);
         }
-        if (data.turnPaths) {
-          setTurnPaths(data.turnPaths);
+        // 后端返回的是 turnArcs（转弯圆弧）
+        if (data.turnArcs) {
+          setTurnArcs(data.turnArcs);
+        }
+        // 后端也会返回 beamPositions（如果已生成）
+        if (data.beamPositions) {
+          setBeamPositions(data.beamPositions);
         }
         message.success({ 
-          content: response.message || `已识别 ${data.intersections?.length || data.length || 0} 个交叉点`, 
+          content: response.message || `已识别 ${data.intersections?.length || 0} 个交叉点, ${data.turnArcs?.length || 0} 条圆弧`, 
           key: 'intersection' 
         });
+        setCurrentStep(2);
         await loadSessionStatus();
       }
     } catch (error: any) {
@@ -1207,12 +1243,23 @@ const GPSMapping: React.FC = () => {
                 <>
                   <Alert
                     message={`正在采集: ${currentRoad?.name}`}
-                    description="请驾驶车辆沿通道行驶，系统将自动记录GPS轨迹"
-                    type="warning"
+                    description={
+                      <div>
+                        <div>GPS状态: {gpsData?.quality >= 4 ? <span style={{color: 'green'}}>FIXED ✓</span> : <span style={{color: 'red'}}>等待FIXED... (当前: {gpsData?.quality || 0})</span>}</div>
+                        <div>卫星数: {gpsData?.satellites || 0}</div>
+                      </div>
+                    }
+                    type={gpsData?.quality >= 4 ? "success" : "warning"}
                     showIcon
                     style={{ marginBottom: 16 }}
                   />
-                  <Statistic title="已记录点数" value={currentRoad?.pointCount || 0} />
+                  <Space direction="vertical">
+                    <Statistic title="已记录GPS点" value={recordStatsRef.current.recorded} />
+                    <Statistic title="尝试记录" value={recordStatsRef.current.attempted} />
+                    {recordStatsRef.current.attempted > 0 && (
+                      <div>成功率: {((recordStatsRef.current.recorded/recordStatsRef.current.attempted)*100).toFixed(1)}%</div>
+                    )}
+                  </Space>
                   <Button
                     type="primary"
                     danger
@@ -1523,19 +1570,14 @@ const GPSMapping: React.FC = () => {
             <Input placeholder="例如：纵向通道A" />
           </Form.Item>
           <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="preferredWidth" label="首选宽度(m)">
-                <InputNumber min={1} max={4} step={0.5} style={{ width: '100%' }} />
+            <Col span={12}>
+              <Form.Item name="preferredWidth" label="首选网络宽度(m)" tooltip="机器人优先通行的道路宽度，默认1.4m">
+                <InputNumber min={0.8} max={4} step={0.1} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
-            <Col span={8}>
-              <Form.Item name="keepoutDistance" label="禁区宽度(m)">
-                <InputNumber min={1} max={5} step={0.5} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="channelWidth" label="通道宽度(m)">
-                <InputNumber min={4} max={10} step={0.5} style={{ width: '100%' }} />
+            <Col span={12}>
+              <Form.Item name="highCostWidth" label="高代价区宽度(m)" tooltip="首选网络外的避免通行区域宽度，默认0.3m">
+                <InputNumber min={0.1} max={2} step={0.1} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>

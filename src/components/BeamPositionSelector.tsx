@@ -33,7 +33,14 @@ interface BeamPosition {
     east?: string;
     west?: string;
   };
-  crossPoints: string[];
+  corner_intersections?: string[];
+  crossPoints?: string[];
+  neighbors?: {
+    left?: string;
+    right?: string;
+    top?: string;
+    bottom?: string;
+  };
 }
 
 interface BeamPositionSelectorProps {
