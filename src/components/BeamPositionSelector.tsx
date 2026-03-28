@@ -1,49 +1,62 @@
 /**
- * 梁位选择器组件
- * 按照文档 web-gps-mapping-design.md 设计实现
- * 
- * 功能：
- * - 从GPS建图数据获取梁位列表
- * - 地图视图显示梁位位置
- * - 点击选择/取消选择梁位
- * - 显示已选梁位列表
+ * 梁位选择器组件 - 简化版
+ * 解决无限循环问题
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  Card, Tag, Space, Button, List, Empty, Spin, message, Tooltip,
-  Badge, Row, Col, Statistic, Divider
-} from 'antd';
-import {
-  EnvironmentOutlined, ReloadOutlined, CheckOutlined,
-  ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined
-} from '@ant-design/icons';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Card, Tag, Space, Button, Empty, Spin, message, Tooltip, Badge, Row, Col, Statistic } from 'antd';
+import { EnvironmentOutlined, ReloadOutlined, CheckOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined } from '@ant-design/icons';
 import { gpsMappingApi } from '../services/gpsMappingApi';
 
-// 梁位数据类型（与GPS建图数据结构一致）
 interface BeamPosition {
   id: string;
   name: string;
-  row: string;
-  col: number;
   center: { x: number; y: number };
-  boundaries: {
-    north?: string;
-    south?: string;
-    east?: string;
-    west?: string;
-  };
   corner_intersections?: string[];
-  crossPoints?: string[];
-  neighbors?: {
-    left?: string;
-    right?: string;
-    top?: string;
-    bottom?: string;
-  };
 }
 
-interface BeamPositionSelectorProps {
+interface RoadPoint {
+  mapXy?: { x: number; y: number };
+  map_xy?: { x: number; y: number };
+}
+
+interface Road {
+  id: string;
+  name: string;
+  type: 'longitudinal' | 'horizontal';
+  params: { preferredWidth: number };
+  points: RoadPoint[];
+}
+
+interface Intersection {
+  id: string;
+  center: { mapXy?: { x: number; y: number }; map_xy?: { x: number; y: number } };
+}
+
+function getMapXy(center: { mapXy?: { x: number; y: number }; map_xy?: { x: number; y: number } }): { x: number; y: number } | null {
+  return center.mapXy || center.map_xy || null;
+}
+
+function getRoadPointMapXy(point: RoadPoint): { x: number; y: number } | null {
+  return point.mapXy || point.map_xy || null;
+}
+
+// 点是否在多边形内部（射线法）
+function isPointInPolygon(point: { x: number; y: number }, polygon: { x: number; y: number }[]): boolean {
+  if (polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y;
+    const xj = polygon[j].x, yj = polygon[j].y;
+    if (((yi > point.y) !== (yj > point.y)) &&
+        (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+interface Props {
   value?: string[];
   onChange?: (value: string[]) => void;
   onPositionsChange?: (positions: BeamPosition[]) => void;
@@ -53,8 +66,8 @@ interface BeamPositionSelectorProps {
   showMap?: boolean;
 }
 
-const BeamPositionSelector: React.FC<BeamPositionSelectorProps> = ({
-  value = [],
+const BeamPositionSelector: React.FC<Props> = ({
+  value: externalValue,
   onChange,
   onPositionsChange,
   mode = 'multiple',
@@ -62,101 +75,61 @@ const BeamPositionSelector: React.FC<BeamPositionSelectorProps> = ({
   disabled = false,
   showMap = true
 }) => {
-  const [beamPositions, setBeamPositions] = useState<BeamPosition[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedBeams, setSelectedBeams] = useState<BeamPosition[]>([]);
+  // 内部状态：当外部未提供value时使用
+  const [internalValue, setInternalValue] = useState<string[]>([]);
+  // 当外部提供value时使用外部值，否则使用内部状态
+  const value = externalValue !== undefined ? externalValue : internalValue;
 
-  // 地图视图
+  const [beamPositions, setBeamPositions] = useState<BeamPosition[]>([]);
+  const [roads, setRoads] = useState<Road[]>([]);
+  const [intersections, setIntersections] = useState<Intersection[]>([]);
+  const [loading, setLoading] = useState(false);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
-  // 加载梁位数据
+  // 用 ref 存储最新值，避免重绘循环
+  const valueRef = useRef(value);
+  const onPositionsChangeRef = useRef(onPositionsChange);
+
+  // 同步 refs
   useEffect(() => {
-    loadBeamPositions();
+    valueRef.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    onPositionsChangeRef.current = onPositionsChange;
+  }, [onPositionsChange]);
+
+  // 加载数据
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const [beamRes, roadsRes, interRes] = await Promise.all([
+          gpsMappingApi.getBeamPositions(),
+          gpsMappingApi.getRoads(),
+          gpsMappingApi.getIntersections()
+        ]);
+        if (beamRes.success && beamRes.data) setBeamPositions(beamRes.data);
+        if (roadsRes.success && roadsRes.data) setRoads(roadsRes.data);
+        if (interRes.success && interRes.data) setIntersections(interRes.data);
+      } catch (e) {
+        console.log('Load data error:', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
   }, []);
 
-  // 同步选中状态
-  useEffect(() => {
-    if (value.length > 0 && beamPositions.length > 0) {
-      const selected = beamPositions.filter(b => value.includes(b.id));
-      setSelectedBeams(selected);
-    } else {
-      setSelectedBeams([]);
-    }
-  }, [value, beamPositions]);
-
-  // 通知父组件
-  useEffect(() => {
-    onPositionsChange?.(selectedBeams);
-  }, [selectedBeams]);
-
   // 绘制地图
-  useEffect(() => {
-    if (showMap) {
-      drawMap();
-    }
-  }, [beamPositions, selectedBeams, scale, offset]);
-
-  const loadBeamPositions = async () => {
-    setLoading(true);
-    try {
-      // 获取最新的GPS建图数据
-      const response = await gpsMappingApi.getBeamPositions();
-      if (response.success && response.data) {
-        setBeamPositions(response.data);
-      } else {
-        setBeamPositions([]);
-      }
-    } catch (error) {
-      console.log('No beam positions found');
-      setBeamPositions([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSelect = (beamId: string) => {
-    if (disabled) return;
-
-    let newValue: string[];
-
-    if (mode === 'multiple') {
-      if (value.includes(beamId)) {
-        newValue = value.filter(id => id !== beamId);
-      } else {
-        if (maxSelect && value.length >= maxSelect) {
-          message.warning(`最多选择 ${maxSelect} 个梁位`);
-          return;
-        }
-        newValue = [...value, beamId];
-      }
-    } else {
-      newValue = value.includes(beamId) ? [] : [beamId];
-    }
-
-    onChange?.(newValue);
-  };
-
-  const handleClear = () => {
-    onChange?.([]);
-  };
-
-  const handleSelectAll = () => {
-    if (maxSelect) {
-      message.warning(`最多选择 ${maxSelect} 个梁位`);
-      return;
-    }
-    onChange?.(beamPositions.map(b => b.id));
-  };
-
-  // 地图绘制
-  const drawMap = () => {
-    if (!canvasRef.current || beamPositions.length === 0) return;
-
+  const drawMap = useCallback(() => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -166,22 +139,19 @@ const BeamPositionSelector: React.FC<BeamPositionSelectorProps> = ({
       canvas.height = container.clientHeight;
     }
 
-    // 清空画布
-    ctx.fillStyle = '#f5f5f5';
+    ctx.fillStyle = '#fafafa';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 绘制网格
-    ctx.strokeStyle = '#e0e0e0';
+    // 网格
+    ctx.strokeStyle = '#e8e8e8';
     ctx.lineWidth = 1;
-    const gridSize = 30 * scale;
-
+    const gridSize = 50 * scale;
     for (let x = offset.x % gridSize; x < canvas.width; x += gridSize) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, canvas.height);
       ctx.stroke();
     }
-
     for (let y = offset.y % gridSize; y < canvas.height; y += gridSize) {
       ctx.beginPath();
       ctx.moveTo(0, y);
@@ -192,286 +162,330 @@ const BeamPositionSelector: React.FC<BeamPositionSelectorProps> = ({
     const originScreenX = canvas.width / 2 + offset.x;
     const originScreenY = canvas.height / 2 + offset.y;
 
-    // 绘制补给站（原点）
+    // 绘制道路
+    roads.forEach(road => {
+      if (road.points.length < 2) return;
+      const pts: { x: number; y: number }[] = [];
+      for (const p of road.points) {
+        const xy = getRoadPointMapXy(p);
+        if (xy) pts.push({ x: originScreenX + xy.x * scale, y: originScreenY - xy.y * scale });
+      }
+      if (pts.length < 2) return;
+
+      ctx.strokeStyle = '#b7eb8f';
+      ctx.lineWidth = (road.params?.preferredWidth || 1.4) * scale * 10;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+
+      ctx.strokeStyle = road.type === 'longitudinal' ? '#1890ff' : '#52c41a';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+    });
+
+    // 绘制交叉点
+    intersections.forEach(inter => {
+      const xy = getMapXy(inter.center);
+      if (!xy) return;
+      ctx.fillStyle = '#722ed1';
+      ctx.beginPath();
+      ctx.arc(originScreenX + xy.x * scale, originScreenY - xy.y * scale, 2 * scale, 0, 2 * Math.PI);
+      ctx.fill();
+    });
+
+    // 绘制补给站
     ctx.fillStyle = '#faad14';
     ctx.beginPath();
-    ctx.arc(originScreenX, originScreenY, 8, 0, 2 * Math.PI);
+    ctx.arc(originScreenX, originScreenY, 3.3 * scale, 0, 2 * Math.PI);
     ctx.fill();
-    ctx.fillStyle = '#faad14';
-    ctx.font = '12px sans-serif';
+    ctx.strokeStyle = '#d48806';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#d48806';
+    ctx.font = `bold ${10 * scale}px sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText('补给站', originScreenX, originScreenY - 15);
+    ctx.fillText('补给站', originScreenX, originScreenY - 8 * scale);
 
-    // 绘制梁位
-    beamPositions.forEach(beam => {
-      const screenX = originScreenX + beam.center.x * scale;
-      const screenY = originScreenY - beam.center.y * scale;
-      const isSelected = value.includes(beam.id);
+    // 绘制选中梁位
+    const selectedIds = valueRef.current;
+    beamPositions.filter(b => selectedIds.includes(b.id)).forEach(beam => {
+      if (beam.corner_intersections && beam.corner_intersections.length >= 4) {
+        const corners: { x: number; y: number }[] = [];
+        for (const id of beam.corner_intersections) {
+          const inter = intersections.find(i => i.id === id);
+          const xy = inter ? getMapXy(inter.center) : null;
+          if (xy) corners.push({ x: originScreenX + xy.x * scale, y: originScreenY - xy.y * scale });
+        }
+        if (corners.length >= 4) {
+          const minX = Math.min(...corners.map(p => p.x));
+          const maxX = Math.max(...corners.map(p => p.x));
+          const minY = Math.min(...corners.map(p => p.y));
+          const maxY = Math.max(...corners.map(p => p.y));
+          const centerX = (minX + maxX) / 2;
+          const centerY = (minY + maxY) / 2;
 
-      // 梁位区域
-      const width = 20 * scale;
-      const height = 40 * scale;
+          const sortX = corners.reduce((s, p) => s + p.x, 0) / corners.length;
+          const sortY = corners.reduce((s, p) => s + p.y, 0) / corners.length;
+          const sorted = [...corners].sort((a, b) => Math.atan2(a.y - sortY, a.x - sortX) - Math.atan2(b.y - sortY, b.x - sortX));
 
-      ctx.fillStyle = isSelected ? 'rgba(82, 196, 26, 0.3)' : 'rgba(24, 144, 255, 0.2)';
-      ctx.fillRect(screenX - width / 2, screenY - height / 2, width, height);
+          ctx.shadowColor = '#52c41a';
+          ctx.shadowBlur = 15 * scale;
+          ctx.fillStyle = 'rgba(82, 196, 26, 0.25)';
+          ctx.beginPath();
+          sorted.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+          ctx.closePath();
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = '#52c41a';
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
 
-      ctx.strokeStyle = isSelected ? '#52c41a' : '#1890ff';
-      ctx.lineWidth = isSelected ? 2 : 1;
-      ctx.strokeRect(screenX - width / 2, screenY - height / 2, width, height);
+          ctx.fillStyle = '#237804';
+          ctx.font = `bold ${14 * scale}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(beam.name, centerX, centerY);
+          ctx.textBaseline = 'alphabetic';
 
-      // 梁位编号
-      ctx.fillStyle = isSelected ? '#52c41a' : '#1890ff';
-      ctx.font = `${isSelected ? 'bold ' : ''}12px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(beam.name, screenX, screenY + 4);
-
-      // 选中标记
-      if (isSelected) {
-        ctx.fillStyle = '#52c41a';
-        ctx.beginPath();
-        ctx.arc(screenX + width / 2 - 5, screenY - height / 2 + 5, 6, 0, 2 * Math.PI);
-        ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 8px sans-serif';
-        ctx.fillText('✓', screenX + width / 2 - 5, screenY - height / 2 + 8);
+          // 对勾绘制在梁位中心，尺寸缩小一半
+          ctx.fillStyle = '#52c41a';
+          ctx.beginPath();
+          ctx.arc(centerX, centerY - 20 * scale, 4 * scale, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.font = `bold ${6 * scale}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('✓', centerX, centerY - 20 * scale);
+          ctx.textBaseline = 'alphabetic';
+        } else {
+          drawFallback(ctx, beam, originScreenX, originScreenY, scale);
+        }
+      } else {
+        drawFallback(ctx, beam, originScreenX, originScreenY, scale);
       }
     });
+  }, [beamPositions, roads, intersections, scale, offset]);
+
+  const drawFallback = (ctx: CanvasRenderingContext2D, beam: BeamPosition, ox: number, oy: number, s: number) => {
+    const sx = ox + beam.center.x * s;
+    const sy = oy - beam.center.y * s;
+    ctx.shadowColor = '#52c41a';
+    ctx.shadowBlur = 15 * s;
+    ctx.fillStyle = 'rgba(82, 196, 26, 0.25)';
+    ctx.fillRect(sx - 20 * s, sy - 30 * s, 40 * s, 60 * s);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#52c41a';
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(sx - 20 * s, sy - 30 * s, 40 * s, 60 * s);
+    ctx.fillStyle = '#237804';
+    ctx.font = `bold ${14 * s}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(beam.name, sx, sy);
+    ctx.textBaseline = 'alphabetic';
+    // 对勾绘制在梁位中心上方，尺寸缩小一半
+    ctx.fillStyle = '#52c41a';
+    ctx.beginPath();
+    ctx.arc(sx, sy - 20 * s, 4 * s, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${6 * s}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✓', sx, sy - 20 * s);
+    ctx.textBaseline = 'alphabetic';
   };
 
-  // 地图事件处理
+  useEffect(() => {
+    if (showMap) drawMap();
+  }, [showMap, drawMap, value]);
+
+  // 选择处理
+  const handleSelect = (id: string) => {
+    if (disabled) return;
+    let newValue: string[];
+    if (mode === 'multiple') {
+      if (valueRef.current.includes(id)) {
+        newValue = valueRef.current.filter(x => x !== id);
+      } else {
+        if (maxSelect && valueRef.current.length >= maxSelect) {
+          message.warning(`最多选择 ${maxSelect} 个`);
+          return;
+        }
+        newValue = [...valueRef.current, id];
+      }
+    } else {
+      newValue = valueRef.current.includes(id) ? [] : [id];
+    }
+    valueRef.current = newValue;
+    // 更新内部状态（当外部未控制时）
+    if (externalValue === undefined) {
+      setInternalValue(newValue);
+    }
+    drawMap();
+    onChange?.(newValue);
+    // 通知父组件选中的梁位详情
+    const selectedBeams = beamPositions.filter(b => newValue.includes(b.id));
+    onPositionsChangeRef.current?.(selectedBeams);
+  };
+
+  const handleSelectAll = () => {
+    if (maxSelect) {
+      message.warning(`最多选择 ${maxSelect} 个`);
+      return;
+    }
+    const newValue = beamPositions.map(b => b.id);
+    valueRef.current = newValue;
+    // 更新内部状态（当外部未控制时）
+    if (externalValue === undefined) {
+      setInternalValue(newValue);
+    }
+    drawMap();
+    onChange?.(newValue);
+    onPositionsChangeRef.current?.(beamPositions);
+  };
+
+  const handleClear = () => {
+    valueRef.current = [];
+    // 更新内部状态（当外部未控制时）
+    if (externalValue === undefined) {
+      setInternalValue([]);
+    }
+    drawMap();
+    onChange?.([]);
+    onPositionsChangeRef.current?.([]);
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);
     setDragStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
   };
-
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging) return;
-    setOffset({
-      x: e.clientX - dragStart.x,
-      y: e.clientY - dragStart.y
-    });
+    setOffset({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
   };
-
   const handleMouseUp = () => setIsDragging(false);
-
   const handleWheel = (e: React.WheelEvent) => {
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setScale(prev => Math.max(0.5, Math.min(3, prev * delta)));
+    setScale(prev => Math.max(0.5, Math.min(3, prev * (e.deltaY > 0 ? 0.9 : 1.1))));
   };
 
   const handleCanvasClick = (e: React.MouseEvent) => {
-    if (!canvasRef.current) return;
-
+    if (!canvasRef.current || beamPositions.length === 0) return;
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
-
     const originScreenX = canvas.width / 2 + offset.x;
     const originScreenY = canvas.height / 2 + offset.y;
+    const clickPoint = { x: clickX, y: clickY };
 
-    // 检查点击了哪个梁位
     for (const beam of beamPositions) {
-      const screenX = originScreenX + beam.center.x * scale;
-      const screenY = originScreenY - beam.center.y * scale;
-      const width = 20 * scale;
-      const height = 40 * scale;
+      if (beam.corner_intersections && beam.corner_intersections.length >= 4) {
+        const corners: { x: number; y: number }[] = [];
+        for (const id of beam.corner_intersections) {
+          const inter = intersections.find(i => i.id === id);
+          const xy = inter ? getMapXy(inter.center) : null;
+          if (xy) corners.push({ x: originScreenX + xy.x * scale, y: originScreenY - xy.y * scale });
+        }
+        if (corners.length >= 4) {
+          // 按角度排序角点，形成正确顺序的多边形
+          const sortX = corners.reduce((s, p) => s + p.x, 0) / corners.length;
+          const sortY = corners.reduce((s, p) => s + p.y, 0) / corners.length;
+          const sortedCorners = [...corners].sort((a, b) =>
+            Math.atan2(a.y - sortY, a.x - sortX) - Math.atan2(b.y - sortY, b.x - sortX)
+          );
 
-      if (
-        clickX >= screenX - width / 2 &&
-        clickX <= screenX + width / 2 &&
-        clickY >= screenY - height / 2 &&
-        clickY <= screenY + height / 2
-      ) {
-        handleSelect(beam.id);
-        return;
+          // 使用多边形点检测
+          if (isPointInPolygon(clickPoint, sortedCorners)) {
+            handleSelect(beam.id);
+            return;
+          }
+        }
+      } else {
+        // 回退到矩形检测
+        const sx = originScreenX + beam.center.x * scale;
+        const sy = originScreenY - beam.center.y * scale;
+        if (clickX >= sx - 20 * scale && clickX <= sx + 20 * scale && clickY >= sy - 30 * scale && clickY <= sy + 30 * scale) {
+          handleSelect(beam.id);
+          return;
+        }
       }
     }
   };
 
-  const handleZoomIn = () => setScale(prev => Math.min(prev * 1.2, 3));
-  const handleZoomOut = () => setScale(prev => Math.max(prev / 1.2, 0.5));
-  const handleResetView = () => {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
-  };
+  const selectedBeams = beamPositions.filter(b => value.includes(b.id));
 
-  if (loading) {
-    return (
-      <Card size="small">
-        <Spin tip="加载梁位数据..." />
-      </Card>
-    );
-  }
+  if (loading) return <Card size="small"><Spin /></Card>;
 
   return (
     <div>
-      {/* 地图视图 */}
-      {showMap && beamPositions.length > 0 && (
-        <Card
-          size="small"
-          title={
-            <Space>
-              <EnvironmentOutlined />
-              <span>梁场地图</span>
-              <Badge count={selectedBeams.length} style={{ backgroundColor: '#52c41a' }} />
-            </Space>
-          }
-          extra={
-            <Space>
-              <Tooltip title="放大">
-                <Button icon={<ZoomInOutlined />} onClick={handleZoomIn} size="small" />
-              </Tooltip>
-              <Tooltip title="缩小">
-                <Button icon={<ZoomOutOutlined />} onClick={handleZoomOut} size="small" />
-              </Tooltip>
-              <Tooltip title="重置视图">
-                <Button icon={<FullscreenOutlined />} onClick={handleResetView} size="small" />
-              </Tooltip>
-            </Space>
-          }
-          style={{ marginBottom: 8 }}
-        >
-          <div
-            style={{
-              width: '100%',
-              height: 300,
-              border: '1px solid #d9d9d9',
-              borderRadius: 4,
-              overflow: 'hidden',
-              cursor: isDragging ? 'grabbing' : 'grab',
-              background: '#f5f5f5',
-              position: 'relative'
-            }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onWheel={handleWheel}
-            onClick={handleCanvasClick}
-          >
-            <canvas
-              ref={canvasRef}
-              style={{ position: 'absolute', top: 0, left: 0 }}
-            />
+      {showMap && (
+        <Card size="small" title={<Space><EnvironmentOutlined /><span>梁场地图</span><Badge count={selectedBeams.length} style={{ backgroundColor: '#52c41a' }} /></Space>}
+          extra={<Space>
+            <Tooltip title="放大"><Button icon={<ZoomInOutlined />} onClick={() => setScale(p => Math.min(p * 1.2, 3))} size="small" /></Tooltip>
+            <Tooltip title="缩小"><Button icon={<ZoomOutOutlined />} onClick={() => setScale(p => Math.max(p / 1.2, 0.5))} size="small" /></Tooltip>
+            <Tooltip title="重置"><Button icon={<FullscreenOutlined />} onClick={() => { setScale(1); setOffset({ x: 0, y: 0 }); }} size="small" /></Tooltip>
+          </Space>} style={{ marginBottom: 8 }}>
+          <div style={{ marginBottom: 8, display: 'flex', gap: 16, fontSize: 12 }}>
+            <Space><div style={{ width: 20, height: 4, background: '#1890ff', borderRadius: 2 }} /><span>纵向道路</span></Space>
+            <Space><div style={{ width: 20, height: 4, background: '#52c41a', borderRadius: 2 }} /><span>横向道路</span></Space>
+            <Space><div style={{ width: 8, height: 8, background: '#faad14', borderRadius: '50%' }} /><span>补给站</span></Space>
+            <Space><div style={{ width: 16, height: 24, background: 'rgba(82, 196, 26, 0.25)', border: '2px solid #52c41a', borderRadius: 2 }} /><span>已选梁位</span></Space>
           </div>
-          <div style={{ marginTop: 8, textAlign: 'center' }}>
-            <Space>
-              <span style={{ color: '#999', fontSize: 12 }}>
-                💡 点击地图上的梁位进行选择
-              </span>
-            </Space>
+          <div style={{ width: '100%', height: 400, border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden', cursor: isDragging ? 'grabbing' : 'grab', background: '#fafafa', position: 'relative' }}
+            onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onWheel={handleWheel} onClick={handleCanvasClick}>
+            <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0 }} />
+            {beamPositions.length === 0 && (
+              <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#999', textAlign: 'center' }}>
+                <EnvironmentOutlined style={{ fontSize: 32, marginBottom: 8 }} />
+                <div>暂无梁位数据</div>
+              </div>
+            )}
           </div>
+          <div style={{ marginTop: 8, textAlign: 'center', color: '#666', fontSize: 12 }}>滚轮缩放 | 拖拽移动</div>
         </Card>
       )}
 
-      {/* 梁位列表 */}
-      <Card
-        size="small"
-        title={
-          <Space>
-            <EnvironmentOutlined />
-            <span>梁位列表</span>
-            {maxSelect && (
-              <Tag color="orange">最多 {maxSelect} 个</Tag>
-            )}
-          </Space>
-        }
-        extra={
-          <Space>
-            <Tooltip title="刷新梁位数据">
-              <Button
-                type="text"
-                icon={<ReloadOutlined />}
-                onClick={loadBeamPositions}
-                size="small"
-              />
-            </Tooltip>
-            {mode === 'multiple' && beamPositions.length > 0 && (
-              <Button size="small" onClick={handleSelectAll} disabled={disabled}>
-                全选
-              </Button>
-            )}
-            {selectedBeams.length > 0 && (
-              <Button size="small" onClick={handleClear} disabled={disabled}>
-                清空
-              </Button>
-            )}
-          </Space>
-        }
-      >
+      <Card size="small" title={<Space><EnvironmentOutlined /><span>梁位列表</span>{maxSelect && <Tag color="orange">最多 {maxSelect} 个</Tag>}</Space>}
+        extra={<Space>
+          <Tooltip title="刷新"><Button type="text" icon={<ReloadOutlined />} onClick={() => { loadBeamPositions(); loadRoads(); loadIntersections(); }} size="small" /></Tooltip>
+          {mode === 'multiple' && beamPositions.length > 0 && <Button size="small" onClick={handleSelectAll} disabled={disabled}>全选</Button>}
+          {selectedBeams.length > 0 && <Button size="small" onClick={handleClear} disabled={disabled}>清空</Button>}
+        </Space>}>
         {beamPositions.length === 0 ? (
-          <Empty
-            description="暂无梁位数据，请先完成GPS建图"
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-          >
-            <Button type="primary" href="/gps-mapping">
-              前往GPS建图
-            </Button>
-          </Empty>
+          <Empty description="暂无梁位数据" image={Empty.PRESENTED_IMAGE_SIMPLE}><Button type="primary" href="/gps-mapping">前往GPS建图</Button></Empty>
         ) : (
-          <List
-            size="small"
-            dataSource={beamPositions}
-            grid={{ column: 4, xs: 2, sm: 3, md: 4, lg: 4, xl: 4, xxl: 6 }}
-            renderItem={beam => {
+          <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {beamPositions.map(beam => {
               const isSelected = value.includes(beam.id);
-
               return (
-                <div
-                  style={{
-                    cursor: disabled ? 'not-allowed' : 'pointer',
-                    background: isSelected ? '#e6f7ff' : 'transparent',
-                    border: isSelected ? '1px solid #1890ff' : '1px solid #d9d9d9',
-                    borderRadius: 4,
-                    padding: 8,
-                    textAlign: 'center',
-                    opacity: disabled ? 0.5 : 1,
-                    margin: 2
-                  }}
-                  onClick={() => handleSelect(beam.id)}
-                >
-                  {isSelected ? (
-                    <CheckOutlined style={{ color: '#1890ff', fontSize: 14 }} />
-                  ) : (
-                    <EnvironmentOutlined style={{ color: '#999', fontSize: 14 }} />
-                  )}
-                  <div style={{ fontSize: 12, marginTop: 4 }}>
-                    {beam.name}
-                  </div>
+                <div key={beam.id} onClick={() => handleSelect(beam.id)}
+                  style={{ cursor: disabled ? 'not-allowed' : 'pointer', background: isSelected ? '#f6ffed' : 'transparent', border: isSelected ? '2px solid #52c41a' : '1px solid #d9d9d9', borderRadius: 6, padding: '8px 12px', textAlign: 'center', opacity: disabled ? 0.5 : 1, transition: 'all 0.2s', boxShadow: isSelected ? '0 2px 8px rgba(82,196,26,0.3)' : 'none' }}
+                  onMouseEnter={e => { if (!isSelected && !disabled) { e.currentTarget.style.borderColor = '#40a9ff'; e.currentTarget.style.background = '#e6f7ff'; } }}
+                  onMouseLeave={e => { if (!isSelected) { e.currentTarget.style.borderColor = '#d9d9d9'; e.currentTarget.style.background = 'transparent'; } }}>
+                  {isSelected ? <CheckOutlined style={{ color: '#52c41a', fontSize: 16 }} /> : <EnvironmentOutlined style={{ color: '#999', fontSize: 16 }} />}
+                  <div style={{ fontSize: 13, marginTop: 4, fontWeight: isSelected ? 'bold' : 'normal', color: isSelected ? '#237804' : 'inherit' }}>{beam.name}</div>
                 </div>
               );
-            }}
-          />
+            })}
+          </div>
         )}
       </Card>
 
-      {/* 已选梁位统计 */}
       {selectedBeams.length > 0 && (
         <Card size="small" style={{ marginTop: 8 }}>
           <Row gutter={16}>
-            <Col span={12}>
-              <Statistic
-                title="已选梁位"
-                value={selectedBeams.length}
-                suffix={`/ ${beamPositions.length}`}
-              />
-            </Col>
-            <Col span={12}>
-              <div style={{ marginTop: 16 }}>
-                <Space wrap>
+            <Col span={6}><Statistic title="已选梁位" value={selectedBeams.length} suffix={`/ ${beamPositions.length}`} valueStyle={{ color: '#52c41a' }} /></Col>
+            <Col span={18}>
+              <div style={{ marginTop: 16, marginBottom: 8, color: '#666', fontSize: 12 }}>点击梁位编号可取消选择：</div>
+              <div style={{ maxHeight: 80, overflowY: 'auto' }}>
+                <Space wrap size={[4, 4]}>
                   {selectedBeams.map(beam => (
-                    <Tag
-                      key={beam.id}
-                      closable={!disabled}
-                      onClose={(e) => {
-                        e.preventDefault();
-                        handleSelect(beam.id);
-                      }}
-                      color="green"
-                    >
-                      {beam.name}
-                    </Tag>
+                    <Tag key={beam.id} closable={!disabled} onClose={e => { e.preventDefault(); handleSelect(beam.id); }} onClick={() => handleSelect(beam.id)} color="green" style={{ cursor: 'pointer', margin: '2px 4px', padding: '2px 8px', fontSize: 13 }}>{beam.name}</Tag>
                   ))}
                 </Space>
               </div>
@@ -481,6 +495,25 @@ const BeamPositionSelector: React.FC<BeamPositionSelectorProps> = ({
       )}
     </div>
   );
+
+  async function loadBeamPositions() {
+    try {
+      const res = await gpsMappingApi.getBeamPositions();
+      if (res.success && res.data) setBeamPositions(res.data);
+    } catch (e) { console.log('No beam positions'); }
+  }
+  async function loadRoads() {
+    try {
+      const res = await gpsMappingApi.getRoads();
+      if (res.success && res.data) setRoads(res.data);
+    } catch (e) { console.log('No roads'); }
+  }
+  async function loadIntersections() {
+    try {
+      const res = await gpsMappingApi.getIntersections();
+      if (res.success && res.data) setIntersections(res.data);
+    } catch (e) { console.log('No intersections'); }
+  }
 };
 
 export default BeamPositionSelector;

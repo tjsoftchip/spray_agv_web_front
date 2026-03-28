@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Card, Button, Space, Modal, Form, Input, Select, InputNumber, message, Tag, Progress, Popconfirm, Empty, Switch, DatePicker, TimePicker, Checkbox, Divider, Row, Col } from 'antd';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { Card, Button, Space, Modal, Form, Input, Select, InputNumber, message, Tag, Progress, Popconfirm, Empty, Switch, DatePicker, TimePicker, Checkbox, Divider, Row, Col, Statistic } from 'antd';
 import { PlusOutlined, PlayCircleOutlined, PauseOutlined, StopOutlined, DeleteOutlined, EyeOutlined, DragOutlined, ClockCircleOutlined, EditOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
@@ -195,6 +195,12 @@ const TaskManagement: React.FC = () => {
   const [selectedBeamPositions, setSelectedBeamPositions] = useState<any[]>([]);
   const [jobRoute, setJobRoute] = useState<any>(null);
 
+  // 使用 useRef 存储回调，避免每次渲染创建新函数
+  const handlePositionsChange = useRef((positions: any[]) => {
+    setSelectedBeamPositions(positions);
+    setJobRoute(null);
+  });
+
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
@@ -249,12 +255,42 @@ const TaskManagement: React.FC = () => {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      await taskApi.createTask(values);
+
+      // 构建任务数据，确保必填字段都有默认值
+      const taskData = {
+        name: values.name,
+        description: values.description || '',
+        priority: values.priority || 2,
+        status: 'pending',
+        templateIds: values.templateIds || [],
+        executionType: values.operationType === 'scheduled' ? 'scheduled' : 'manual',
+        operationType: values.operationType || 'single',
+        scheduleConfig: values.scheduleConfig || null,
+        isScheduleEnabled: values.operationType === 'scheduled',
+        executionParams: {
+          operationSpeed: 0.5,
+          beamPositions: selectedBeamPositions.map(b => b.id),
+          route: jobRoute || null,
+        },
+        transitionSequence: [],
+        progress: 0,
+        executionLogs: [],
+        navigationSequence: jobRoute?.segments?.map((seg: any, index: number) => ({
+          pointId: seg.roadId || `seg_${index}`,
+          pointName: seg.name,
+          position: { x: 0, y: 0, z: 0 },
+          orientation: { x: 0, y: 0, z: 0, w: 1 },
+          status: 'pending'
+        })) || [],
+      };
+
+      await taskApi.createTask(taskData);
       message.success('创建成功');
       setModalVisible(false);
       loadTasks();
     } catch (error: any) {
-      message.error('创建失败');
+      console.error('创建任务失败:', error);
+      message.error('创建失败: ' + (error.response?.data?.error || error.message || '未知错误'));
     }
   };
 
@@ -490,162 +526,161 @@ const TaskManagement: React.FC = () => {
       </Card>
 
       <Modal
-        title="创建任务"
+        title="创建作业任务"
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
-        width={600}
+        width={1400}
+        styles={{ body: { maxHeight: '75vh', overflowY: 'auto' } }}
+        okText="确定创建"
+        cancelText="取消"
       >
         <Form form={form} layout="vertical">
-          <Form.Item
-            name="name"
-            label="任务名称"
-            rules={[{ required: true, message: '请输入任务名称' }]}
-          >
-            <Input placeholder="请输入任务名称" />
-          </Form.Item>
+          <Row gutter={24}>
+            {/* 左侧：基本信息 */}
+            <Col span={6}>
+              <Form.Item
+                name="name"
+                label="任务名称"
+                rules={[{ required: true, message: '请输入任务名称' }]}
+              >
+                <Input placeholder="例如：A区喷淋作业" />
+              </Form.Item>
 
-          <Form.Item name="description" label="描述">
-            <TextArea rows={3} placeholder="请输入描述" />
-          </Form.Item>
+              <Form.Item name="description" label="描述">
+                <TextArea rows={2} placeholder="任务描述（可选）" />
+              </Form.Item>
 
-          <Form.Item
-            name="priority"
-            label="优先级"
-            rules={[{ required: true, message: '请选择优先级' }]}
-            initialValue={2}
-          >
-            <Select>
-              <Select.Option value={1}>高</Select.Option>
-              <Select.Option value={2}>中</Select.Option>
-              <Select.Option value={3}>低</Select.Option>
-            </Select>
-          </Form.Item>
+              <Form.Item
+                name="priority"
+                label="优先级"
+                rules={[{ required: true, message: '请选择优先级' }]}
+                initialValue={2}
+              >
+                <Select>
+                  <Select.Option value={1}>高</Select.Option>
+                  <Select.Option value={2}>中</Select.Option>
+                  <Select.Option value={3}>低</Select.Option>
+                </Select>
+              </Form.Item>
 
-          <Divider>梁场作业配置</Divider>
-          
-          <Form.Item
-            label="选择梁位"
-            extra="选择需要喷淋作业的梁位，系统将自动生成最优路线"
-          >
-            <BeamPositionSelector 
-              mode="multiple" 
-              maxSelect={20}
-              onPositionsChange={(positions) => {
-                setSelectedBeamPositions(positions);
-                // 当梁位变化时，重置路线
-                setJobRoute(null);
-              }}
-            />
-          </Form.Item>
+              <Form.Item
+                name="operationType"
+                label="执行方式"
+                rules={[{ required: true, message: '请选择执行方式' }]}
+                initialValue="single"
+              >
+                <Select>
+                  <Select.Option value="single">单次执行</Select.Option>
+                  <Select.Option value="scheduled">定时执行</Select.Option>
+                </Select>
+              </Form.Item>
 
-          {selectedBeamPositions.length > 0 && (
-            <Form.Item
-              label="作业路线规划"
-            >
-              <JobRoutePlanner 
-                beamPositions={selectedBeamPositions}
-                onChange={(route) => {
-                  setJobRoute(route);
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, currentValues) => prevValues.operationType !== currentValues.operationType}
+              >
+                {({ getFieldValue }) => {
+                  return getFieldValue('operationType') === 'scheduled' ? (
+                    <Form.Item label="定时策略">
+                      <Space direction="vertical" style={{ width: '100%' }} size="small">
+                        <Form.Item
+                          name={['scheduleConfig', 'type']}
+                          label="执行周期"
+                          initialValue="daily"
+                          style={{ marginBottom: 8 }}
+                        >
+                          <Select style={{ width: '100%' }}>
+                            <Select.Option value="once">单次定时</Select.Option>
+                            <Select.Option value="daily">每天</Select.Option>
+                            <Select.Option value="weekly">每周</Select.Option>
+                          </Select>
+                        </Form.Item>
+
+                        <Form.Item
+                          name={['scheduleConfig', 'time']}
+                          label="执行时间"
+                          initialValue={dayjs('09:00', 'HH:mm')}
+                          style={{ marginBottom: 8 }}
+                        >
+                          <TimePicker format="HH:mm" style={{ width: '100%' }} />
+                        </Form.Item>
+
+                        <Form.Item
+                          noStyle
+                          shouldUpdate={(prevValues, currentValues) =>
+                            prevValues.scheduleConfig?.type !== currentValues.scheduleConfig?.type
+                          }
+                        >
+                          {({ getFieldValue }) => {
+                            const scheduleType = getFieldValue(['scheduleConfig', 'type']);
+                            return scheduleType === 'weekly' ? (
+                              <Form.Item
+                                name={['scheduleConfig', 'weekdays']}
+                                label="选择星期"
+                                initialValue={[1, 2, 3, 4, 5]}
+                              >
+                                <Checkbox.Group>
+                                  <Checkbox value={1}>周一</Checkbox>
+                                  <Checkbox value={2}>周二</Checkbox>
+                                  <Checkbox value={3}>周三</Checkbox>
+                                  <Checkbox value={4}>周四</Checkbox>
+                                  <Checkbox value={5}>周五</Checkbox>
+                                  <Checkbox value={6}>周六</Checkbox>
+                                  <Checkbox value={0}>周日</Checkbox>
+                                </Checkbox.Group>
+                              </Form.Item>
+                            ) : null;
+                          }}
+                        </Form.Item>
+                      </Space>
+                    </Form.Item>
+                  ) : null;
                 }}
-              />
-            </Form.Item>
-          )}
+              </Form.Item>
 
-          {selectedBeamPositions.length > 0 && jobRoute && (
-            <Card size="small" style={{ marginBottom: 16, background: '#fafafa' }}>
-              <Space>
-                <span>路线总长度: <strong>{jobRoute.totalDistance?.toFixed(1) || 0}m</strong></span>
-                <span>预计时间: <strong>{jobRoute.estimatedTime || 0}分钟</strong></span>
-                <span>梁位数量: <strong>{selectedBeamPositions.length}个</strong></span>
-              </Space>
-            </Card>
-          )}
+              {selectedBeamPositions.length > 0 && jobRoute && (
+                <Card size="small" style={{ marginTop: 8, background: '#f6ffed', borderColor: '#b7eb8f' }}>
+                  <Statistic
+                    title="路线概览"
+                    value={selectedBeamPositions.length}
+                    suffix="个梁位"
+                    valueStyle={{ fontSize: 18, color: '#52c41a' }}
+                  />
+                  <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+                    <div>路线总长: {jobRoute.totalDistance?.toFixed(1) || jobRoute.totalLength?.toFixed(1) || 0}m</div>
+                    <div>预计时间: {jobRoute.estimatedTime || 0}分钟</div>
+                  </div>
+                </Card>
+              )}
+            </Col>
 
-          <Divider>操作模板（可选）</Divider>
+            {/* 右侧：梁位选择和路线规划 */}
+            <Col span={18}>
+              <Form.Item
+                label={<span style={{ fontSize: 14, fontWeight: 500 }}>选择作业梁位</span>}
+                extra="选择需要喷淋作业的梁位，系统将自动生成最优路线"
+                style={{ marginBottom: 8 }}
+              >
+                <BeamPositionSelector
+                  mode="multiple"
+                  maxSelect={20}
+                  onPositionsChange={handlePositionsChange.current}
+                />
+              </Form.Item>
 
-          <Form.Item
-            name="templateIds"
-            label="操作模板"
-            extra="拖拽可调整执行顺序，或使用上方梁位选择功能"
-          >
-            <TemplateDragSelector templates={templates} />
-          </Form.Item>
-
-          
-
-          <Form.Item
-            name="operationType"
-            label="操作频率"
-            rules={[{ required: true, message: '请选择操作频率' }]}
-            initialValue="single"
-          >
-            <Select style={{ width: 200 }}>
-              <Select.Option value="single">单次执行</Select.Option>
-              <Select.Option value="scheduled">定时执行</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(prevValues, currentValues) => prevValues.operationType !== currentValues.operationType}
-          >
-            {({ getFieldValue }) => {
-              return getFieldValue('operationType') === 'scheduled' ? (
-                <Form.Item label="定时策略">
-                  <Space vertical style={{ width: '100%' }}>
-                    <Form.Item
-                      name={['scheduleConfig', 'type']}
-                      label="执行周期"
-                      initialValue="daily"
-                    >
-                      <Select style={{ width: 200 }}>
-                        <Select.Option value="once">单次定时</Select.Option>
-                        <Select.Option value="daily">每天</Select.Option>
-                        <Select.Option value="weekly">每周</Select.Option>
-                      </Select>
-                    </Form.Item>
-                    
-                    <Form.Item
-                      name={['scheduleConfig', 'time']}
-                      label="执行时间"
-                      initialValue={dayjs('09:00', 'HH:mm')}
-                    >
-                      <TimePicker format="HH:mm" style={{ width: 200 }} />
-                    </Form.Item>
-                    
-                    <Form.Item
-                      noStyle
-                      shouldUpdate={(prevValues, currentValues) => 
-                        prevValues.scheduleConfig?.type !== currentValues.scheduleConfig?.type
-                      }
-                    >
-                      {({ getFieldValue }) => {
-                        const scheduleType = getFieldValue(['scheduleConfig', 'type']);
-                        return scheduleType === 'weekly' ? (
-                          <Form.Item
-                            name={['scheduleConfig', 'weekdays']}
-                            label="选择星期"
-                            initialValue={[1, 2, 3, 4, 5]}
-                          >
-                            <Checkbox.Group>
-                              <Checkbox value={1}>周一</Checkbox>
-                              <Checkbox value={2}>周二</Checkbox>
-                              <Checkbox value={3}>周三</Checkbox>
-                              <Checkbox value={4}>周四</Checkbox>
-                              <Checkbox value={5}>周五</Checkbox>
-                              <Checkbox value={6}>周六</Checkbox>
-                              <Checkbox value={0}>周日</Checkbox>
-                            </Checkbox.Group>
-                          </Form.Item>
-                        ) : null;
-                      }}
-                    </Form.Item>
-                  </Space>
+              {selectedBeamPositions.length > 0 && (
+                <Form.Item label={<span style={{ fontSize: 14, fontWeight: 500 }}>作业路线规划</span>} style={{ marginBottom: 8 }}>
+                  <JobRoutePlanner
+                    beamPositions={selectedBeamPositions}
+                    onChange={(route) => {
+                      setJobRoute(route);
+                    }}
+                  />
                 </Form.Item>
-              ) : null;
-            }}
-          </Form.Item>
+              )}
+            </Col>
+          </Row>
         </Form>
       </Modal>
     </div>

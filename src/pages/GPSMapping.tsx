@@ -18,7 +18,7 @@ import {
   SaveOutlined, ReloadOutlined, DeleteOutlined, PlusOutlined,
   AimOutlined, CarOutlined, BorderOutlined, FileImageOutlined,
   ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined,
-  NodeIndexOutlined, LeftOutlined, RollbackOutlined
+  NodeIndexOutlined, LeftOutlined, RollbackOutlined, FolderOpenOutlined
 } from '@ant-design/icons';
 import GPSStatusCard from '../components/GPSStatusCard';
 import { socketService } from '../services/socket';
@@ -51,7 +51,8 @@ interface GPSData {
 interface RoadPoint {
   seq: number;
   gps: { latitude: number; longitude: number; altitude: number };
-  mapXy: { x: number; y: number };
+  mapXy?: { x: number; y: number };
+  map_xy?: { x: number; y: number };
 }
 
 interface Road {
@@ -85,7 +86,8 @@ interface Intersection {
   type: string;
   center: {
     gps: { latitude: number; longitude: number; altitude: number };
-    mapXy: { x: number; y: number };
+    mapXy?: { x: number; y: number };
+    map_xy?: { x: number; y: number };
   };
   road_v_id?: string;           // 纵向道路ID（V4.0新增）
   road_h_id?: string;           // 横向道路ID（V4.0新增）
@@ -104,7 +106,8 @@ interface TurnPath {
   points: Array<{
     seq: number;
     gps: { latitude: number; longitude: number; altitude: number };
-    mapXy: { x: number; y: number };
+    mapXy?: { x: number; y: number };
+    map_xy?: { x: number; y: number };
   }>;
 }
 
@@ -119,7 +122,8 @@ interface TurnArc {
   points: Array<{
     seq: number;
     gps: { latitude: number; longitude: number; altitude: number };
-    mapXy: { x: number; y: number };
+    mapXy?: { x: number; y: number };
+    map_xy?: { x: number; y: number };
   }>;
   beam_position_id?: string;  // 关联的梁位ID（V4.0新增）
 }
@@ -132,7 +136,8 @@ interface StraightPath {
   points: Array<{
     seq: number;
     gps: { latitude: number; longitude: number; altitude: number };
-    mapXy: { x: number; y: number };
+    mapXy?: { x: number; y: number };
+    map_xy?: { x: number; y: number };
   }>;
 }
 
@@ -177,6 +182,15 @@ interface MappingSession {
   beamPositionCount: number;
   currentRoadId: string | null;
   lastUpdateTime: number;
+}
+
+// Helper functions for coordinate compatibility (mapXy vs map_xy)
+function getMapXy(center: { mapXy?: { x: number; y: number }; map_xy?: { x: number; y: number } }): { x: number; y: number } | null {
+  return center.mapXy || center.map_xy || null;
+}
+
+function getRoadPointMapXy(point: { mapXy?: { x: number; y: number }; map_xy?: { x: number; y: number } }): { x: number; y: number } | null {
+  return point.mapXy || point.map_xy || null;
 }
 
 const GPSMapping: React.FC = () => {
@@ -232,7 +246,10 @@ const GPSMapping: React.FC = () => {
   const [newRoadModalVisible, setNewRoadModalVisible] = useState(false);
   const [editBeamModalVisible, setEditBeamModalVisible] = useState(false);
   const [saveMapModalVisible, setSaveMapModalVisible] = useState(false);
+  const [loadMapModalVisible, setLoadMapModalVisible] = useState(false);
   const [editBeamId, setEditBeamId] = useState<string | null>(null);
+  const [savedMaps, setSavedMaps] = useState<Array<{id: string; name: string; status: string; createdAt: string}>>([]);
+  const [loadingMaps, setLoadingMaps] = useState(false);
 
   // 表单
   const [newRoadForm] = Form.useForm();
@@ -436,12 +453,20 @@ const GPSMapping: React.FC = () => {
       if (response.success && response.data) {
         setSession(response.data);
 
-        // V3.0新增：加载turnArcs和straightPaths数据
+        // 加载turnArcs和straightPaths数据
         if (response.data.turnArcs) {
           setTurnArcs(response.data.turnArcs);
         }
         if (response.data.straightPaths) {
           setStraightPaths(response.data.straightPaths);
+        }
+        // 加载intersections数据（用于绘制梁位多边形）
+        if (response.data.intersections) {
+          setIntersections(response.data.intersections);
+        }
+        // 加载beamPositions数据
+        if (response.data.beamPositions) {
+          setBeamPositions(response.data.beamPositions);
         }
 
         if (response.data.status === 'completed') {
@@ -810,6 +835,70 @@ const GPSMapping: React.FC = () => {
     }
   };
 
+  // 加载已保存的地图列表
+  const loadSavedMaps = async () => {
+    setLoadingMaps(true);
+    try {
+      const response = await gpsMappingApi.getSavedMaps();
+      if (response.success && response.data) {
+        setSavedMaps(response.data);
+      }
+    } catch (error) {
+      message.error('获取地图列表失败');
+    } finally {
+      setLoadingMaps(false);
+    }
+  };
+
+  // 从数据库加载地图
+  const loadMapFromDatabase = async (mapId: string) => {
+    try {
+      message.loading({ content: '正在加载地图...', key: 'loadMap' });
+      const response = await gpsMappingApi.loadMappingFromDatabase(mapId);
+      if (response.success) {
+        // 加载交叉点数据
+        try {
+          const intersectionsResponse = await gpsMappingApi.getIntersections();
+          if (intersectionsResponse.success && intersectionsResponse.data) {
+            setIntersections(intersectionsResponse.data);
+          }
+        } catch (e) {
+          console.log('No intersections data');
+        }
+
+        // 加载圆弧数据
+        try {
+          const turnArcsResponse = await gpsMappingApi.getTurnArcs();
+          if (turnArcsResponse.success && turnArcsResponse.data) {
+            setTurnArcs(turnArcsResponse.data);
+          }
+        } catch (e) {
+          console.log('No turn arcs data');
+        }
+
+        message.success({ content: '地图加载成功！', key: 'loadMap' });
+        setLoadMapModalVisible(false);
+        // 重新加载会话状态
+        await loadSessionStatus();
+        await loadOrigin();
+        await loadRoads();
+        // 加载交叉点和圆弧
+        const statusResponse = await gpsMappingApi.getMappingStatus();
+        if (statusResponse.data?.beamPositions) {
+          setBeamPositions(statusResponse.data.beamPositions);
+        }
+      }
+    } catch (error) {
+      message.error({ content: '加载地图失败', key: 'loadMap' });
+    }
+  };
+
+  // 打开加载地图对话框
+  const showLoadMapModal = () => {
+    loadSavedMaps();
+    setLoadMapModalVisible(true);
+  };
+
   const resetMapping = async () => {
     Modal.confirm({
       title: '确认重置',
@@ -843,7 +932,7 @@ const GPSMapping: React.FC = () => {
 
   useEffect(() => {
     drawMap();
-  }, [roads, beamPositions, gpsData, scale, offset, origin]);
+  }, [roads, beamPositions, intersections, turnArcs, straightPaths, gpsData, scale, offset, origin]);
 
   const drawMap = () => {
     if (!canvasRef.current) return;
@@ -902,10 +991,18 @@ const GPSMapping: React.FC = () => {
       const points = road.points || [];
       if (points.length < 2) return;
 
-      const screenPoints = points.map((pt: RoadPoint) => ({
-        x: originScreenX + pt.mapXy.x * scale,
-        y: originScreenY - pt.mapXy.y * scale
-      }));
+      const screenPoints: { x: number; y: number }[] = [];
+      points.forEach((pt: RoadPoint) => {
+        const xy = getRoadPointMapXy(pt);
+        if (xy) {
+          screenPoints.push({
+            x: originScreenX + xy.x * scale,
+            y: originScreenY - xy.y * scale
+          });
+        }
+      });
+
+      if (screenPoints.length < 2) return;
 
       // 绘制首选路网（绿色）
       ctx.strokeStyle = '#52c41a';
@@ -932,8 +1029,10 @@ const GPSMapping: React.FC = () => {
 
     // 绘制交叉点
     intersections.forEach(intersection => {
-      const screenX = originScreenX + intersection.center.mapXy.x * scale;
-      const screenY = originScreenY - intersection.center.mapXy.y * scale;
+      const xy = getMapXy(intersection.center);
+      if (!xy) return;
+      const screenX = originScreenX + xy.x * scale;
+      const screenY = originScreenY - xy.y * scale;
 
       ctx.fillStyle = '#722ed1';
       ctx.beginPath();
@@ -967,8 +1066,10 @@ const GPSMapping: React.FC = () => {
       ctx.setLineDash([4, 2]); // 虚线
       ctx.beginPath();
       turnPath.points.forEach((pt, i) => {
-        const screenX = originScreenX + pt.mapXy.x * scale;
-        const screenY = originScreenY - pt.mapXy.y * scale;
+        const xy = getRoadPointMapXy(pt);
+        if (!xy) return;
+        const screenX = originScreenX + xy.x * scale;
+        const screenY = originScreenY - xy.y * scale;
         if (i === 0) ctx.moveTo(screenX, screenY);
         else ctx.lineTo(screenX, screenY);
       });
@@ -985,8 +1086,10 @@ const GPSMapping: React.FC = () => {
       ctx.lineWidth = 3;
       ctx.beginPath();
       arc.points.forEach((pt, i) => {
-        const screenX = originScreenX + pt.mapXy.x * scale;
-        const screenY = originScreenY - pt.mapXy.y * scale;
+        const xy = getRoadPointMapXy(pt);
+        if (!xy) return;
+        const screenX = originScreenX + xy.x * scale;
+        const screenY = originScreenY - xy.y * scale;
         if (i === 0) ctx.moveTo(screenX, screenY);
         else ctx.lineTo(screenX, screenY);
       });
@@ -1011,8 +1114,10 @@ const GPSMapping: React.FC = () => {
       ctx.setLineDash([2, 2]); // 虚线
       ctx.beginPath();
       sp.points.forEach((pt, i) => {
-        const screenX = originScreenX + pt.mapXy.x * scale;
-        const screenY = originScreenY - pt.mapXy.y * scale;
+        const xy = getRoadPointMapXy(pt);
+        if (!xy) return;
+        const screenX = originScreenX + xy.x * scale;
+        const screenY = originScreenY - xy.y * scale;
         if (i === 0) ctx.moveTo(screenX, screenY);
         else ctx.lineTo(screenX, screenY);
       });
@@ -1021,24 +1126,110 @@ const GPSMapping: React.FC = () => {
     });
 
     // 绘制梁位
-    beamPositions.forEach(beam => {
-      const screenX = originScreenX + beam.center.x * scale;
-      const screenY = originScreenY - beam.center.y * scale;
+    beamPositions.forEach((beam, beamIndex) => {
+      // 如果有角点数据，使用角点绘制实际区域
+      if (beam.corner_intersections && beam.corner_intersections.length >= 4) {
+        // 根据角点交叉点ID查找交叉点位置
+        const cornerPoints: { x: number; y: number }[] = [];
+        for (const interId of beam.corner_intersections) {
+          const inter = intersections.find(i => i.id === interId);
+          const xy = inter ? getMapXy(inter.center) : null;
+          if (xy) {
+            cornerPoints.push({
+              x: originScreenX + xy.x * scale,
+              y: originScreenY - xy.y * scale
+            });
+          }
+        }
 
-      const width = 25 * scale;
-      const height = 50 * scale;
+        // 调试：检查角点数据是否完整
+        if (beamIndex === 0 && cornerPoints.length < 4) {
+          console.log('[梁位调试] 第一个梁位角点数据:', {
+            beamId: beam.id,
+            beamName: beam.name,
+            beamCenter: beam.center,
+            cornerIds: beam.corner_intersections,
+            foundPoints: cornerPoints.length,
+            totalIntersections: intersections.length
+          });
+        }
 
-      ctx.fillStyle = 'rgba(24, 144, 255, 0.2)';
-      ctx.fillRect(screenX - width / 2, screenY - height / 2, width, height);
+        if (cornerPoints.length >= 4) {
+          // 计算边界框的min/max
+          const minX = Math.min(...cornerPoints.map(p => p.x));
+          const maxX = Math.max(...cornerPoints.map(p => p.x));
+          const minY = Math.min(...cornerPoints.map(p => p.y));
+          const maxY = Math.max(...cornerPoints.map(p => p.y));
 
-      ctx.strokeStyle = '#1890ff';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(screenX - width / 2, screenY - height / 2, width, height);
+          // 使用边界框中心作为梁位中心（更准确）
+          const centerX = (minX + maxX) / 2;
+          const centerY = (minY + maxY) / 2;
 
-      ctx.fillStyle = '#1890ff';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(beam.name, screenX, screenY + 5);
+          // 按角度排序绘制多边形
+          const sortCenterX = cornerPoints.reduce((sum, p) => sum + p.x, 0) / cornerPoints.length;
+          const sortCenterY = cornerPoints.reduce((sum, p) => sum + p.y, 0) / cornerPoints.length;
+          const sortedPoints = [...cornerPoints].sort((a, b) => {
+            const angleA = Math.atan2(a.y - sortCenterY, a.x - sortCenterX);
+            const angleB = Math.atan2(b.y - sortCenterY, b.x - sortCenterX);
+            return angleA - angleB;
+          });
+
+          // 绘制多边形
+          ctx.fillStyle = 'rgba(24, 144, 255, 0.15)';
+          ctx.beginPath();
+          sortedPoints.forEach((pt, i) => {
+            if (i === 0) ctx.moveTo(pt.x, pt.y);
+            else ctx.lineTo(pt.x, pt.y);
+          });
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.strokeStyle = '#1890ff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // 在边界框中心绘制梁位名称
+          ctx.fillStyle = '#1890ff';
+          ctx.font = 'bold 14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(beam.name, centerX, centerY);
+        } else {
+          // 角点数据不完整，使用beam.center作为后备
+          console.warn(`[梁位绘制] ${beam.name} 角点数据不完整(${cornerPoints.length}/4)，使用后备方案`);
+          const screenX = originScreenX + beam.center.x * scale;
+          const screenY = originScreenY - beam.center.y * scale;
+          ctx.fillStyle = 'rgba(24, 144, 255, 0.2)';
+          ctx.fillRect(screenX - 20, screenY - 20, 40, 40);
+          ctx.strokeStyle = '#1890ff';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(screenX - 20, screenY - 20, 40, 40);
+          ctx.fillStyle = '#1890ff';
+          ctx.font = 'bold 14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(beam.name, screenX, screenY);
+        }
+      } else {
+        // 兼容旧格式：使用固定大小矩形，使用beam.center作为中心
+        const screenX = originScreenX + beam.center.x * scale;
+        const screenY = originScreenY - beam.center.y * scale;
+        const width = 25 * scale;
+        const height = 50 * scale;
+
+        ctx.fillStyle = 'rgba(24, 144, 255, 0.2)';
+        ctx.fillRect(screenX - width / 2, screenY - height / 2, width, height);
+
+        ctx.strokeStyle = '#1890ff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(screenX - width / 2, screenY - height / 2, width, height);
+
+        ctx.fillStyle = '#1890ff';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(beam.name, screenX, screenY);
+      }
     });
 
     // 绘制当前位置（带节流）
@@ -1132,7 +1323,18 @@ const GPSMapping: React.FC = () => {
     <div style={{ padding: 24 }}>
       {/* 步骤指示器 */}
       <Card style={{ marginBottom: 16 }}>
-        <Steps current={currentStep} items={steps.map(s => ({ title: s.title, icon: s.icon }))} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ flex: 1 }}>
+            <Steps current={currentStep} items={steps.map(s => ({ title: s.title, icon: s.icon }))} />
+          </div>
+          <Button
+            icon={<FolderOpenOutlined />}
+            onClick={showLoadMapModal}
+            style={{ marginLeft: 16 }}
+          >
+            加载地图
+          </Button>
+        </div>
         {/* 回退按钮区域 */}
         {currentStep > 0 && (
           <div style={{ marginTop: 16, textAlign: 'center' }}>
@@ -1245,11 +1447,11 @@ const GPSMapping: React.FC = () => {
                     message={`正在采集: ${currentRoad?.name}`}
                     description={
                       <div>
-                        <div>GPS状态: {gpsData?.quality >= 4 ? <span style={{color: 'green'}}>FIXED ✓</span> : <span style={{color: 'red'}}>等待FIXED... (当前: {gpsData?.quality || 0})</span>}</div>
-                        <div>卫星数: {gpsData?.satellites || 0}</div>
+                        <div>GPS状态: {(gpsData?.quality ?? 0) >= 4 ? <span style={{color: 'green'}}>FIXED ✓</span> : <span style={{color: 'red'}}>等待FIXED... (当前: {gpsData?.quality ?? 0})</span>}</div>
+                        <div>卫星数: {gpsData?.satellites ?? 0}</div>
                       </div>
                     }
-                    type={gpsData?.quality >= 4 ? "success" : "warning"}
+                    type={(gpsData?.quality ?? 0) >= 4 ? "success" : "warning"}
                     showIcon
                     style={{ marginBottom: 16 }}
                   />
@@ -1631,6 +1833,55 @@ const GPSMapping: React.FC = () => {
             <Input.TextArea rows={3} placeholder="可选描述信息" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 加载地图对话框 */}
+      <Modal
+        title="加载已保存的地图"
+        open={loadMapModalVisible}
+        onCancel={() => setLoadMapModalVisible(false)}
+        footer={null}
+        width={600}
+      >
+        <List
+          loading={loadingMaps}
+          dataSource={savedMaps}
+          renderItem={map => (
+            <List.Item
+              actions={[
+                <Button
+                  type="primary"
+                  size="small"
+                  onClick={() => loadMapFromDatabase(map.id)}
+                >
+                  加载
+                </Button>,
+                <Popconfirm
+                  title="确定删除此地图？"
+                  onConfirm={async () => {
+                    try {
+                      await gpsMappingApi.deleteSavedMap(map.id);
+                      message.success('地图已删除');
+                      loadSavedMaps();
+                    } catch (error) {
+                      message.error('删除失败');
+                    }
+                  }}
+                >
+                  <Button size="small" danger>
+                    删除
+                  </Button>
+                </Popconfirm>
+              ]}
+            >
+              <List.Item.Meta
+                title={<Space><Tag color={map.status === 'completed' ? 'green' : 'blue'}>{map.status}</Tag>{map.name}</Space>}
+                description={`创建时间: ${new Date(map.createdAt).toLocaleString()}`}
+              />
+            </List.Item>
+          )}
+          locale={{ emptyText: '暂无已保存的地图' }}
+        />
       </Modal>
     </div>
   );
