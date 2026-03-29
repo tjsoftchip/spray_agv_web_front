@@ -114,11 +114,43 @@ const BeamPositionSelector: React.FC<Props> = ({
           gpsMappingApi.getRoads(),
           gpsMappingApi.getIntersections()
         ]);
-        if (beamRes.success && beamRes.data) setBeamPositions(beamRes.data);
+
+        console.log('[BeamPositionSelector] API响应:', {
+          beam: beamRes.success ? beamRes.data?.length : 'failed',
+          roads: roadsRes.success ? roadsRes.data?.length : 'failed',
+          intersections: interRes.success ? interRes.data?.length : 'failed'
+        });
+
+        if (beamRes.success && beamRes.data) {
+          console.log('[BeamPositionSelector] 第一个梁位数据:', JSON.stringify(beamRes.data[0], null, 2));
+          setBeamPositions(beamRes.data);
+        }
         if (roadsRes.success && roadsRes.data) setRoads(roadsRes.data);
-        if (interRes.success && interRes.data) setIntersections(interRes.data);
+        if (interRes.success && interRes.data) {
+          // 检查交叉点数据格式
+          if (interRes.data.length > 0) {
+            console.log('[BeamPositionSelector] 第一个交叉点:', JSON.stringify(interRes.data[0], null, 2));
+            console.log('[BeamPositionSelector] 交叉点center格式:',
+              interRes.data[0].center?.mapXy ? 'mapXy' :
+              interRes.data[0].center?.map_xy ? 'map_xy' : 'unknown');
+          }
+          setIntersections(interRes.data);
+        }
+
+        // 检查梁位与交叉点的匹配
+        if (beamRes.data && interRes.data && beamRes.data.length > 0) {
+          const beam = beamRes.data[0];
+          if (beam.corner_intersections) {
+            console.log('[BeamPositionSelector] 梁位角点ID:', beam.corner_intersections);
+            const matchedIntersections = beam.corner_intersections.map((id: string) => {
+              const found = interRes.data.find((i: any) => i.id === id);
+              return { id, found: !!found, center: found?.center };
+            });
+            console.log('[BeamPositionSelector] 匹配结果:', matchedIntersections);
+          }
+        }
       } catch (e) {
-        console.log('Load data error:', e);
+        console.error('Load data error:', e);
       } finally {
         setLoading(false);
       }
