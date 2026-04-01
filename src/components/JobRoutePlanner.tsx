@@ -12,12 +12,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Row, Col, Button, Space, Tag, List, Empty, Spin, message,
-  Tooltip, Collapse, Divider, Statistic, Badge
+  Tooltip, Collapse, Badge
 } from 'antd';
 import {
   EnvironmentOutlined, ReloadOutlined, PlayCircleOutlined,
-  CheckCircleOutlined, ArrowRightOutlined, EyeOutlined,
-  WarningOutlined, SettingOutlined
+  CheckCircleOutlined, ArrowRightOutlined, EyeOutlined
 } from '@ant-design/icons';
 import { gpsMappingApi, jobPlanningApi } from '../services/gpsMappingApi';
 import JobRouteDetailModal from './JobRouteDetailModal';
@@ -195,68 +194,38 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
             />
           ) : (
             <>
-              {/* 路线概览 */}
-              <Row gutter={16} style={{ marginBottom: 16 }}>
-                <Col span={6}>
-                  <Statistic
-                    title="总距离"
-                    value={route.totalLength.toFixed(1)}
-                    suffix="米"
-                    valueStyle={{ fontSize: 18 }}
-                  />
-                </Col>
-                <Col span={6}>
-                  <Statistic
-                    title="预估时间"
-                    value={formatTime(route.estimatedTime)}
-                    valueStyle={{ fontSize: 18 }}
-                  />
-                </Col>
-                <Col span={6}>
-                  <Statistic
-                    title="喷淋梁位"
-                    value={route.beamPositions.length}
-                    suffix="个"
-                    valueStyle={{ fontSize: 18, color: '#52c41a' }}
-                  />
-                </Col>
-                <Col span={6}>
-                  <Statistic
-                    title="路段数"
-                    value={route.segments.length}
-                    suffix="段"
-                    valueStyle={{ fontSize: 18 }}
-                  />
-                </Col>
-              </Row>
-
-              <Divider style={{ margin: '12px 0' }} />
-
               {/* 喷淋状态概览 */}
-              <Row gutter={16} style={{ marginBottom: 16 }}>
-                <Col span={8}>
+              <Row gutter={16} style={{ marginBottom: 12 }}>
+                <Col span={6}>
                   <div style={{ textAlign: 'center', padding: 8, background: '#f6ffed', borderRadius: 4 }}>
+                    <div style={{ fontSize: 12, color: '#666' }}>总距离</div>
+                    <div style={{ fontSize: 18, fontWeight: 'bold' }}>{route.totalLength.toFixed(1)}m</div>
+                  </div>
+                </Col>
+                <Col span={6}>
+                  <div style={{ textAlign: 'center', padding: 8, background: '#e6f7ff', borderRadius: 4 }}>
+                    <div style={{ fontSize: 12, color: '#666' }}>预估时间</div>
+                    <div style={{ fontSize: 18, fontWeight: 'bold' }}>{formatTime(route.estimatedTime)}</div>
+                  </div>
+                </Col>
+                <Col span={6}>
+                  <div style={{ textAlign: 'center', padding: 8, background: '#fff7e6', borderRadius: 4 }}>
                     <Tag color="green">双侧喷淋</Tag>
                     <div style={{ fontSize: 16, fontWeight: 'bold' }}>{sprayStats.both} 段</div>
                   </div>
                 </Col>
-                <Col span={8}>
-                  <div style={{ textAlign: 'center', padding: 8, background: '#e6f7ff', borderRadius: 4 }}>
+                <Col span={6}>
+                  <div style={{ textAlign: 'center', padding: 8, background: '#f0f5ff', borderRadius: 4 }}>
                     <Tag color="blue">单侧喷淋</Tag>
                     <div style={{ fontSize: 16, fontWeight: 'bold' }}>{sprayStats.single} 段</div>
                   </div>
                 </Col>
-                <Col span={8}>
-                  <div style={{ textAlign: 'center', padding: 8, background: '#fff7e6', borderRadius: 4 }}>
-                    <Tag color="orange">喷淋距离</Tag>
-                    <div style={{ fontSize: 16, fontWeight: 'bold' }}>{sprayStats.sprayLength.toFixed(0)}m</div>
-                  </div>
-                </Col>
               </Row>
 
-              {/* 路线段预览 */}
+              {/* 路线段预览 - 默认展开，显示全部路段 */}
               <Collapse
                 size="small"
+                defaultActiveKey={['1']}
                 items={[
                   {
                     key: '1',
@@ -264,7 +233,7 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
                     children: (
                       <List
                         size="small"
-                        dataSource={route.segments.slice(0, 10)}
+                        dataSource={route.segments}
                         renderItem={seg => {
                           const config = sprayModeConfig[seg.sprayMode] || sprayModeConfig['none'];
                           return (
@@ -275,7 +244,7 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
                                   <span>{seg.name}</span>
                                 </Space>
                                 <Space>
-                                  <span style={{ fontSize: 12, color: '#999' }}>{seg.length}m</span>
+                                  <span style={{ fontSize: 12, color: '#999' }}>{seg.length.toFixed(1)}m</span>
                                   <Tag color={config.color}>{config.label}</Tag>
                                 </Space>
                               </Space>

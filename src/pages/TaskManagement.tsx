@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Card, Button, Space, Modal, Form, Input, Select, InputNumber, message, Tag, Progress, Popconfirm, Empty, Switch, DatePicker, TimePicker, Checkbox, Divider, Row, Col, Statistic } from 'antd';
-import { PlusOutlined, PlayCircleOutlined, PauseOutlined, StopOutlined, DeleteOutlined, EyeOutlined, DragOutlined, ClockCircleOutlined, EditOutlined } from '@ant-design/icons';
+import { Card, Button, Space, Modal, Form, Input, Select, message, Tag, Progress, Popconfirm, Empty, TimePicker, Checkbox, Row, Col, Statistic } from 'antd';
+import { PlusOutlined, PlayCircleOutlined, PauseOutlined, StopOutlined, DeleteOutlined, EyeOutlined, DragOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -12,6 +12,14 @@ import BeamPositionSelector from '../components/BeamPositionSelector';
 import JobRoutePlanner from '../components/JobRoutePlanner';
 
 const { TextArea } = Input;
+
+// 格式化预估时间（秒转换为分秒格式）
+const formatEstimatedTime = (seconds: number): string => {
+  if (seconds < 60) return `${seconds}秒`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return secs > 0 ? `${minutes}分${secs}秒` : `${minutes}分钟`;
+};
 
 interface SortableTaskCardProps {
   id: string;
@@ -639,6 +647,7 @@ const TaskManagement: React.FC = () => {
                 }}
               </Form.Item>
 
+              {/* 路线概览卡片 */}
               {selectedBeamPositions.length > 0 && jobRoute && (
                 <Card size="small" style={{ marginTop: 8, background: '#f6ffed', borderColor: '#b7eb8f' }}>
                   <Statistic
@@ -649,7 +658,7 @@ const TaskManagement: React.FC = () => {
                   />
                   <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
                     <div>路线总长: {jobRoute.totalDistance?.toFixed(1) || jobRoute.totalLength?.toFixed(1) || 0}m</div>
-                    <div>预计时间: {jobRoute.estimatedTime || 0}分钟</div>
+                    <div>预计时间: {formatEstimatedTime(jobRoute.estimatedTime || 0)}</div>
                   </div>
                 </Card>
               )}

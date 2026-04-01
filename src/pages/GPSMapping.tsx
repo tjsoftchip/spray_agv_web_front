@@ -21,8 +21,9 @@ import {
   NodeIndexOutlined, LeftOutlined, RollbackOutlined, FolderOpenOutlined
 } from '@ant-design/icons';
 import GPSStatusCard from '../components/GPSStatusCard';
+import RoutePreview from '../components/RoutePreview';
 import { socketService } from '../services/socket';
-import { gpsMappingApi } from '../services/gpsMappingApi';
+import { gpsMappingApi, jobPlanningApi } from '../services/gpsMappingApi';
 
 // 扩展Window类型声明
 declare global {
@@ -250,6 +251,10 @@ const GPSMapping: React.FC = () => {
   const [editBeamId, setEditBeamId] = useState<string | null>(null);
   const [savedMaps, setSavedMaps] = useState<Array<{id: string; name: string; status: string; createdAt: string}>>([]);
   const [loadingMaps, setLoadingMaps] = useState(false);
+
+  // 作业路线规划
+  const [selectedBeamIds, setSelectedBeamIds] = useState<string[]>([]);
+  const [showRoutePreview, setShowRoutePreview] = useState(false);
 
   // 表单
   const [newRoadForm] = Form.useForm();
@@ -1266,13 +1271,16 @@ const GPSMapping: React.FC = () => {
       };
       
       if (needConvert) {
-        // 需要转换时才调用 API
+        // 需要转换时才调用 API（使用本地端点，无需认证）
         gpsMappingApi.convertGPSToMap(lat, lon).then(response => {
           if (response.success && response.data) {
             // 缓存转换结果
             lastConvertedGpsRef.current = { lat, lon, x: response.data.x, y: response.data.y };
             drawCurrentPosition(response.data.x, response.data.y);
           }
+        }).catch(err => {
+          // 原点未校准时静默忽略错误
+          console.debug('[GPS建图] 坐标转换跳过:', err?.response?.data?.message || '原点未校准');
         });
       } else if (lastConvertedGpsRef.current) {
         // 使用缓存的结果绘制
@@ -1594,20 +1602,22 @@ const GPSMapping: React.FC = () => {
 
           {/* Step 3: 生成地图 */}
           {currentStep === 3 && (
-            <Card 
-              title="生成地图" 
-              size="small" 
+            <Card
+              title="生成地图"
+              size="small"
               style={{ marginBottom: 16 }}
               extra={
-                <Button size="small" onClick={goToPrevStep}>
-                  上一步
-                </Button>
+                <Space>
+                  <Button size="small" onClick={goToPrevStep}>
+                    上一步
+                  </Button>
+                </Space>
               }
             >
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Alert
                   message="准备就绪"
-                  description={`共${roads.length}条道路、${intersections.length}个交叉点、${beamPositions.length}个梁位`}
+                  description={`${roads.length}条道路、${intersections.length}个交叉点、${beamPositions.length}个梁位`}
                   type="success"
                   showIcon
                   style={{ marginBottom: 16 }}
@@ -1627,6 +1637,20 @@ const GPSMapping: React.FC = () => {
                 >
                   保存到数据库
                 </Button>
+
+                {/* 作业路线规划入口 */}
+                {beamPositions.length > 0 && (
+                  <>
+                    <Divider style={{ margin: '12px 0' }}>作业规划</Divider>
+                    <Button
+                      block
+                      icon={<PlayCircleOutlined />}
+                      onClick={() => setShowRoutePreview(!showRoutePreview)}
+                    >
+                      {showRoutePreview ? '隐藏' : '显示'}路线预览
+                    </Button>
+                  </>
+                )}
               </Space>
             </Card>
           )}
@@ -1737,20 +1761,71 @@ const GPSMapping: React.FC = () => {
                 </div>
               )}
             </div>
-
-            {/* 图例 */}
-            <div style={{ marginTop: 16, padding: 16, background: '#fafafa', borderRadius: 4 }}>
-              <Space size="large" wrap>
-                <span><span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: '#1890ff', marginRight: 8 }} />补给站</span>
-                <span><span style={{ display: 'inline-block', width: 20, height: 4, background: '#52c41a', marginRight: 8 }} />首选路网</span>
-                <span><span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: '#722ed1', marginRight: 8 }} />交叉点</span>
-                <span><span style={{ display: 'inline-block', width: 12, height: 12, background: 'rgba(24, 144, 255, 0.3)', border: '1px solid #1890ff', marginRight: 8 }} />梁位</span>
-                <span><span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: '#ff4d4f', marginRight: 8 }} />当前位置</span>
-                <span><span style={{ display: 'inline-block', width: 20, height: 2, background: '#eb2f96', marginRight: 8 }} />转弯圆弧</span>
-                <span><span style={{ display: 'inline-block', width: 20, height: 2, background: '#722ed1', marginRight: 8 }} />直行线路</span>
-              </Space>
-            </div>
           </Card>
+
+          {/* 路线预览区域 */}
+          {showRoutePreview && beamPositions.length > 0 && (
+            <RoutePreview
+              beamPositionIds={selectedBeamIds}
+              onRouteGenerated={(route) => {
+                console.log('Route generated:', route);
+              }}
+              height={400}
+            />
+          )}
+
+          {/* 梁位选择器（路线预览可见时显示） */}
+          {showRoutePreview && beamPositions.length > 0 && (
+            <Card
+              title="选择作业梁位"
+              size="small"
+              style={{ marginTop: 16 }}
+              extra={
+                <Space>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setSelectedBeamIds(beamPositions.map(b => b.id));
+                    }}
+                  >
+                    全选
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => setSelectedBeamIds([])}
+                  >
+                    清空
+                  </Button>
+                </Space>
+              }
+            >
+              <div style={{ maxHeight: 150, overflow: 'auto' }}>
+                <Space wrap>
+                  {beamPositions.map(beam => (
+                    <Tag
+                      key={beam.id}
+                      color={selectedBeamIds.includes(beam.id) ? 'blue' : 'default'}
+                      style={{ cursor: 'pointer', marginBottom: 4 }}
+                      onClick={() => {
+                        setSelectedBeamIds(prev =>
+                          prev.includes(beam.id)
+                            ? prev.filter(id => id !== beam.id)
+                            : [...prev, beam.id]
+                        );
+                      }}
+                    >
+                      {beam.name}
+                    </Tag>
+                  ))}
+                </Space>
+              </div>
+              {selectedBeamIds.length > 0 && (
+                <div style={{ marginTop: 8, color: '#666' }}>
+                  已选择 {selectedBeamIds.length} 个梁位
+                </div>
+              )}
+            </Card>
+          )}
         </Col>
       </Row>
 

@@ -1,6 +1,7 @@
 /**
  * GPS建图API服务
  * 与后端gpsMappingController完全对齐
+ * 使用本地端点（-local后缀），无需认证
  */
 
 import { apiService } from './api';
@@ -9,7 +10,7 @@ export const gpsMappingApi = {
   // ==================== 原点校准 ====================
 
   startOriginCalibration: () =>
-    apiService.post('/gps-mapping/origin/start'),
+    apiService.post('/gps-mapping/origin/start-local'),
 
   completeOriginCalibration: (data: {
     latitude: number;
@@ -18,10 +19,10 @@ export const gpsMappingApi = {
     rotation?: number;
     arUcoDetected?: boolean;
   }) =>
-    apiService.post('/gps-mapping/origin/complete', data),
+    apiService.post('/gps-mapping/origin/complete-local', data),
 
   getOrigin: () =>
-    apiService.get('/gps-mapping/origin'),
+    apiService.get('/gps-mapping/origin-local'),
 
   // ==================== 道路采集 ====================
 
@@ -33,7 +34,7 @@ export const gpsMappingApi = {
       highCostWidth?: number;
     };
   }) =>
-    apiService.post('/gps-mapping/roads/start', data),
+    apiService.post('/gps-mapping/roads/start-local', data),
 
   recordRoadPoint: (roadId: string, data: {
     latitude: number;
@@ -43,10 +44,10 @@ export const gpsMappingApi = {
     apiService.post(`/gps-mapping/roads/${roadId}/points`, data),
 
   endRoadRecording: () =>
-    apiService.post('/gps-mapping/roads/end'),
+    apiService.post('/gps-mapping/roads/end-local'),
 
   getRoads: () =>
-    apiService.get('/gps-mapping/roads'),
+    apiService.get('/gps-mapping/roads-local'),
 
   updateRoad: (roadId: string, data: {
     name?: string;
@@ -63,21 +64,21 @@ export const gpsMappingApi = {
   // ==================== 交叉点与圆弧生成 ====================
 
   generateIntersections: () =>
-    apiService.post('/gps-mapping/intersections/generate'),
+    apiService.post('/gps-mapping/intersections/generate-local'),
 
   getIntersections: () =>
-    apiService.get('/gps-mapping/intersections'),
+    apiService.get('/gps-mapping/intersections-local'),
 
   getTurnArcs: () =>
-    apiService.get('/gps-mapping/turn-arcs'),
+    apiService.get('/gps-mapping/turn-arcs-local'),
 
   // ==================== 梁位 ====================
 
   generateBeamPositions: () =>
-    apiService.post('/gps-mapping/beam-positions/generate'),
+    apiService.post('/gps-mapping/beam-positions/generate-local'),
 
   getBeamPositions: () =>
-    apiService.get('/gps-mapping/beam-positions'),
+    apiService.get('/gps-mapping/beam-positions-local'),
 
   updateBeamPosition: (beamId: string, data: {
     name?: string;
@@ -92,15 +93,15 @@ export const gpsMappingApi = {
   // ==================== 地图文件生成 ====================
 
   generateMapFiles: () =>
-    apiService.post('/gps-mapping/generate-files'),
+    apiService.post('/gps-mapping/generate-files-local'),
 
   // ==================== 建图状态 ====================
 
   getMappingStatus: () =>
-    apiService.get('/gps-mapping/status'),
+    apiService.get('/gps-mapping/status-local'),
 
   resetMapping: () =>
-    apiService.post('/gps-mapping/reset'),
+    apiService.post('/gps-mapping/reset-local'),
 
   // ==================== 数据库持久化 ====================
 
@@ -108,29 +109,29 @@ export const gpsMappingApi = {
     name: string;
     description?: string;
   }) =>
-    apiService.post('/gps-mapping/save', data),
+    apiService.post('/gps-mapping/save-local', data),
 
   loadMappingFromDatabase: (id: string) =>
     apiService.get(`/gps-mapping/load/${id}`),
 
   getSavedMaps: () =>
-    apiService.get('/gps-mapping/maps'),
+    apiService.get('/gps-mapping/maps-local'),
 
   deleteSavedMap: (id: string) =>
     apiService.delete(`/gps-mapping/maps/${id}`),
 
-  // ==================== 坐标转换 ====================
+  // ==================== 坐标转换（本地端点，无需认证） ====================
 
   convertGPSToMap: (latitude: number, longitude: number) =>
-    apiService.post('/gps-mapping/convert/gps-to-map', { latitude, longitude }),
+    apiService.post('/gps-mapping/convert/gps-to-map-local', { latitude, longitude }),
 
   convertMapToGPS: (x: number, y: number) =>
-    apiService.post('/gps-mapping/convert/map-to-gps', { x, y }),
+    apiService.post('/gps-mapping/convert/map-to-gps-local', { x, y }),
 
   // ==================== GPS状态 ====================
 
   getGPSStatus: () =>
-    apiService.get('/gps-mapping/gps-status'),
+    apiService.get('/gps-mapping/gps-status-local'),
 
   // ==================== 数据导出 ====================
 
@@ -142,14 +143,20 @@ export const gpsMappingApi = {
 };
 
 /**
- * 作业规划API
+ * 作业规划API（使用本地端点，无需认证）
  */
 export const jobPlanningApi = {
   getBeamPositions: () =>
-    apiService.get('/job/beam-positions'),
+    apiService.get('/job/beam-positions-local'),
 
   planRoutes: (beamPositionIds: string[]) =>
-    apiService.post('/job/plan-routes', { beamPositionIds }),
+    apiService.post('/job/plan-routes-local', { beamPositionIds }),
+
+  previewRoute: (beamPositionIds: string[]) =>
+    apiService.post('/job/preview-local', { beamPositionIds }),
+
+  getMapData: () =>
+    apiService.get('/job/map-data-local'),
 
   executeJob: (routeId: string, beamPositionIds: string[]) =>
     apiService.post('/job/execute', { routeId, beamPositionIds }),
@@ -164,7 +171,7 @@ export const jobPlanningApi = {
     apiService.post('/job/stop'),
 
   getJobStatus: () =>
-    apiService.get('/job/status'),
+    apiService.get('/job/status-local'),
 
   getJobHistory: () =>
     apiService.get('/job/history'),
