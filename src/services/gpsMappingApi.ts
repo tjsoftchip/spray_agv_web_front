@@ -149,8 +149,8 @@ export const jobPlanningApi = {
   getBeamPositions: () =>
     apiService.get('/job/beam-positions-local'),
 
-  planRoutes: (beamPositionIds: string[]) =>
-    apiService.post('/job/plan-routes-local', { beamPositionIds }),
+  planRoutes: (beamPositionIds: string[], taskName?: string) =>
+    apiService.post('/job/plan-routes-local', { beamPositionIds, taskName }),
 
   previewRoute: (beamPositionIds: string[]) =>
     apiService.post('/job/preview-local', { beamPositionIds }),

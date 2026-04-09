@@ -23,29 +23,47 @@ import JobRouteDetailModal from './JobRouteDetailModal';
 
 // 路线段类型（与后端一致）
 interface RouteSegment {
-  seq: number;
+  id: string;
+  type: 'road' | 'turn_arc' | 'transit';
+  road_id?: string;
+  arc_id?: string;
+  beam_id?: string;
+  side?: string;
+  spray_mode: 'none' | 'both' | 'left_only' | 'right_only';
+  waypoints: Array<{ x: number; y: number; yaw: number; spray_action?: string }>;
+}
+
+// 后端返回的路线类型
+interface BackendJobRoute {
+  id: string;
   name: string;
-  roadId: string;
-  length: number;
-  sprayMode: 'none' | 'both' | 'left_only' | 'right_only';
-  armStatus: 'retracted' | 'extended' | 'left_extended' | 'right_extended';
-  sprayConfig?: {
-    arm: string;
-    leftValve: boolean;
-    rightValve: boolean;
-    pump: boolean;
-    mountRaised: boolean;
+  created: string;
+  beam_sequence: string[];
+  segments: RouteSegment[];
+  statistics: {
+    total_length: number;
+    estimated_time: number;
+    spray_length: number;
+    transit_length: number;
   };
 }
 
-// 路线类型
+// 前端显示用的路线类型
 interface JobRoute {
   id: string;
   name: string;
   totalLength: number;
   estimatedTime: number;
-  segments: RouteSegment[];
+  segments: Array<{
+    seq: number;
+    name: string;
+    roadId: string;
+    length: number;
+    sprayMode: 'none' | 'both' | 'left_only' | 'right_only';
+    armStatus: 'retracted' | 'extended' | 'left_extended' | 'right_extended';
+  }>;
   beamPositions: string[];
+  routeFilePath?: string;  // 路线文件路径
 }
 
 interface BeamPosition {
@@ -61,6 +79,52 @@ interface JobRoutePlannerProps {
   value?: JobRoute;
   onChange?: (route: JobRoute) => void;
   disabled?: boolean;
+}
+
+// 将后端路线格式转换为前端显示格式
+function convertBackendRouteToFrontend(backendRoute: BackendJobRoute): JobRoute {
+  const segments = (backendRoute.segments || []).map((seg, index) => {
+    // 计算路段长度
+    let length = 0;
+    const waypoints = seg.waypoints || [];
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const dx = waypoints[i + 1].x - waypoints[i].x;
+      const dy = waypoints[i + 1].y - waypoints[i].y;
+      length += Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // 生成路段名称
+    let name = seg.type === 'road' ? `道路 ${seg.road_id || index + 1}` :
+               seg.type === 'turn_arc' ? `转弯 ${seg.arc_id || index + 1}` :
+               `过渡段 ${index + 1}`;
+    if (seg.beam_id && seg.side) {
+      name = `${seg.beam_id} - ${seg.side}`;
+    }
+
+    // 确定机械臂状态
+    let armStatus: 'retracted' | 'extended' | 'left_extended' | 'right_extended' = 'retracted';
+    if (seg.spray_mode === 'both') armStatus = 'extended';
+    else if (seg.spray_mode === 'left_only') armStatus = 'left_extended';
+    else if (seg.spray_mode === 'right_only') armStatus = 'right_extended';
+
+    return {
+      seq: index + 1,
+      name,
+      roadId: seg.road_id || '',
+      length: Math.round(length * 10) / 10,
+      sprayMode: seg.spray_mode || 'none',
+      armStatus
+    };
+  });
+
+  return {
+    id: backendRoute.id || `route_${Date.now()}`,
+    name: backendRoute.name || '作业路线',
+    totalLength: backendRoute.statistics?.total_length || 0,
+    estimatedTime: backendRoute.statistics?.estimated_time || 0,
+    segments,
+    beamPositions: backendRoute.beam_sequence || []
+  };
 }
 
 const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
@@ -82,17 +146,17 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
 
   // 当梁位变化时，自动规划路线
   useEffect(() => {
-    if (beamPositions.length > 0) {
+    if (beamPositions && beamPositions.length > 0) {
       autoPlanRoute();
     } else {
       setRoute(null);
       onChange?.(null as any);
     }
-  }, [beamPositions.map(b => b.id).join(',')]);
+  }, [beamPositions ? beamPositions.map(b => b.id).join(',') : '']);
 
   // 自动规划路线
   const autoPlanRoute = async () => {
-    if (beamPositions.length === 0) {
+    if (!beamPositions || beamPositions.length === 0) {
       message.warning('请先选择梁位');
       return;
     }
@@ -100,18 +164,26 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
     setLoading(true);
     try {
       const beamIds = beamPositions.map(b => b.id);
-      const response = await jobPlanningApi.planRoutes(beamIds);
+      // 使用梁位ID组合作为taskName，确保每个任务有唯一文件名
+      const taskName = beamIds.join('_');
+      const response = await jobPlanningApi.planRoutes(beamIds, taskName);
 
       if (response.success && response.data?.route) {
-        setRoute(response.data.route);
-        onChange?.(response.data.route);
+        // 转换后端数据格式为前端格式
+        const frontendRoute = convertBackendRouteToFrontend(response.data.route);
+        // 保存routeFilePath信息
+        frontendRoute.routeFilePath = response.data.routeFilePath;
+        setRoute(frontendRoute);
+        onChange?.(frontendRoute);
         message.success('已生成最优作业路线');
       } else {
         message.error(response.message || '路线规划失败');
+        setRoute(null);
       }
     } catch (error: any) {
       console.error('路线规划失败:', error);
       message.error('路线规划失败，请检查GPS建图数据');
+      setRoute(null);
     } finally {
       setLoading(false);
     }
@@ -134,16 +206,19 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
   };
 
   // 统计喷淋路段
-  const sprayStats = route?.segments.reduce((acc, seg) => {
-    if (seg.sprayMode === 'both') {
-      acc.both++;
-      acc.sprayLength += seg.length;
-    } else if (seg.sprayMode === 'left_only' || seg.sprayMode === 'right_only') {
-      acc.single++;
-      acc.sprayLength += seg.length;
-    }
-    return acc;
-  }, { both: 0, single: 0, sprayLength: 0 }) || { both: 0, single: 0, sprayLength: 0 };
+  const sprayStats = React.useMemo(() => {
+    if (!route?.segments) return { both: 0, single: 0, sprayLength: 0 };
+    return route.segments.reduce((acc, seg) => {
+      if (seg.sprayMode === 'both') {
+        acc.both++;
+        acc.sprayLength += seg.length || 0;
+      } else if (seg.sprayMode === 'left_only' || seg.sprayMode === 'right_only') {
+        acc.single++;
+        acc.sprayLength += seg.length || 0;
+      }
+      return acc;
+    }, { both: 0, single: 0, sprayLength: 0 });
+  }, [route?.segments]);
 
   return (
     <div>
@@ -153,7 +228,7 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
           <Space>
             <PlayCircleOutlined />
             <span>作业路线规划</span>
-            {route && <Badge count={route.beamPositions.length} style={{ backgroundColor: '#52c41a' }} />}
+            {route && route.beamPositions && <Badge count={route.beamPositions.length} style={{ backgroundColor: '#52c41a' }} />}
           </Space>
         }
         extra={
@@ -162,7 +237,7 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
               <Button
                 icon={<ReloadOutlined />}
                 onClick={autoPlanRoute}
-                disabled={disabled || beamPositions.length === 0}
+                disabled={disabled || !beamPositions || beamPositions.length === 0}
                 loading={loading}
                 size="small"
               >
@@ -182,7 +257,7 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
         }
       >
         <Spin spinning={loading}>
-          {beamPositions.length === 0 ? (
+          {!beamPositions || beamPositions.length === 0 ? (
             <Empty
               description="请先选择梁位"
               image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -229,8 +304,8 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
                 items={[
                   {
                     key: '1',
-                    label: `路线段详情 (${route.segments.length}段)`,
-                    children: (
+                    label: `路线段详情 (${route.segments ? route.segments.length : 0}段)`,
+                    children: route.segments && route.segments.length > 0 ? (
                       <List
                         size="small"
                         dataSource={route.segments}
@@ -252,6 +327,8 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
                           );
                         }}
                       />
+                    ) : (
+                      <Empty description="暂无路线段数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                     )
                   }
                 ]}
@@ -259,8 +336,8 @@ const JobRoutePlanner: React.FC<JobRoutePlannerProps> = ({
 
               {/* 闭环提示 */}
               <div style={{ marginTop: 12, textAlign: 'center', color: '#999', fontSize: 12 }}>
-                <EnvironmentOutlined /> 补给站 → {route.beamPositions.slice(0, 5).join(' → ')}
-                {route.beamPositions.length > 5 && ` ... +${route.beamPositions.length - 5}个`}
+                <EnvironmentOutlined /> 补给站 → {route.beamPositions && route.beamPositions.slice(0, 5).join(' → ')}
+                {route.beamPositions && route.beamPositions.length > 5 && ` ... +${route.beamPositions.length - 5}个`}
                 {' '}→ 补给站
               </div>
             </>

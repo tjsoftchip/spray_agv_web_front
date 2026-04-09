@@ -275,6 +275,7 @@ const TaskManagement: React.FC = () => {
         operationType: values.operationType || 'single',
         scheduleConfig: values.scheduleConfig || null,
         isScheduleEnabled: values.operationType === 'scheduled',
+        routeFilePath: jobRoute?.routeFilePath || null,  // 保存路线文件路径
         executionParams: {
           operationSpeed: 0.5,
           beamPositions: selectedBeamPositions.map(b => b.id),
