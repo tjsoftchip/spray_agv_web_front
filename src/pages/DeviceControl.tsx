@@ -15,14 +15,14 @@ const DeviceControl: React.FC = () => {
   // const [controlMode, setControlMode] = useState<'auto' | 'manual'>('auto');
   const [velocity, setVelocity] = useState({ linear: 0, angular: 0 });
   const [steerAngle, setSteerAngle] = useState(0); // 转向角度 -18~18 度
-  const [maxSteerAngle, setMaxSteerAngle] = useState(18); // 最大转向角度，默认18度
+  const [maxSteerAngle, setMaxSteerAngle] = useState(24); // 最大转向角度，默认24度
   const [joystickPosition, setJoystickPosition] = useState({ x: 0, y: 0 }); // 摇杆位置 -1~1
   const [isDragging, setIsDragging] = useState(false);
   const joystickRef = useRef<HTMLDivElement>(null);
   const [isMoving, setIsMoving] = useState(false);
   const velocityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentVelocityRef = useRef({ linear: 0, angular: 0 }); // 存储当前速度，供定时器使用
-  const [maxSpeed, setMaxSpeed] = useState(0.2); // 默认最大速度0.2m/s，最大限制0.5m/s
+  const [maxSpeed, setMaxSpeed] = useState(0.35); // 默认最大速度0.35m/s，最大限制1m/s
   const [isJoystickActive, setIsJoystickActive] = useState(true); // 手柄激活状态
   const [isFullControlMode, setIsFullControlMode] = useState(false); // 完全接管模式状态
 
@@ -698,11 +698,11 @@ const DeviceControl: React.FC = () => {
                     fontWeight: 600,
                     color: '#495057'
                   }}>
-                    ⚡ 最大移动速度 (m/s) - 限制最高0.5m/s
+                    ⚡ 最大移动速度 (m/s) - 限制最高1m/s
                   </label>
                   <InputNumber
                     min={0.1}
-                    max={0.5}
+                    max={1.0}
                     step={0.05}
                     value={maxSpeed}
                     onChange={(value) => {
