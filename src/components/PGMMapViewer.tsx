@@ -378,7 +378,7 @@ const PGMMapViewer: React.FC<PGMMapViewerProps> = ({
 
   const handleGetCurrentPosition = async () => {
     try {
-      const data = await apiService.get('/templates/robot/current-position');
+      const data = await apiService.get('/navigation/robot-position');
       if (data && data.position) {
         setLocalRobotPosition(data.position);
       }

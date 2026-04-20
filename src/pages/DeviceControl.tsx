@@ -122,36 +122,27 @@ const DeviceControl: React.FC = () => {
   };
 
   const handleEmergencyStop = () => {
-    // 停止所有运动
     stopVelocityPublishing();
     setVelocity({ linear: 0, angular: 0 });
-    
-    // 停止喷淋设备
-    setPumpStatus(false);
-    setLeftValveStatus(false);
-    setRightValveStatus(false);
-    publishRosCommand('/spray/pump_control', 'std_msgs/Bool', { data: false });
-    publishRosCommand('/spray/left_valve_control', 'std_msgs/Bool', { data: false });
-    publishRosCommand('/spray/right_valve_control', 'std_msgs/Bool', { data: false });
-    
-    // 发送停止命令
-    const stopMessage = {
-      linear: { x: 0.0, y: 0.0, z: 0.0 },
-      angular: { x: 0.0, y: 0.0, z: 0.0 }
-    };
-    publishRosCommand('/manual/cmd_vel', 'geometry_msgs/msg/Twist', stopMessage);
-    // 设置紧急停止状态
+
+    socketService.sendRosCommand({
+      op: 'call_service',
+      service: '/emergency_stop',
+      args: { data: true },
+    });
+
     setEmergencyStopActive(true);
-    publishRosCommand('/emergency/stop', 'std_msgs/Bool', { data: true });
-    
     message.warning('紧急停止已触发 - 所有控制已失效');
-    
   };
 
-  // 复位紧急停止
   const resetEmergencyStop = () => {
+    socketService.sendRosCommand({
+      op: 'call_service',
+      service: '/emergency_stop',
+      args: { data: false },
+    });
+
     setEmergencyStopActive(false);
-    publishRosCommand('/emergency/stop', 'std_msgs/Bool', { data: false });
     message.success('紧急停止已复位 - 控制权已恢复');
   };
 

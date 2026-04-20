@@ -9,7 +9,6 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Loading from './components/Loading';
 
 const Login = lazy(() => import('./pages/Login'));
-const TemplateManagement = lazy(() => import('./pages/TemplateManagement'));
 const TaskManagement = lazy(() => import('./pages/TaskManagement'));
 const DeviceControl = lazy(() => import('./pages/DeviceControl'));
 const SupplyManagement = lazy(() => import('./pages/SupplyManagement'));
@@ -41,7 +40,6 @@ const App: React.FC = () => {
                       <MainLayout>
                         <Routes>
                         <Route path="/" element={<Navigate to="/monitor" replace />} />
-                        <Route path="/templates" element={<TemplateManagement />} />
                         <Route path="/tasks" element={<TaskManagement />} />
                         <Route path="/monitor" element={<StatusMonitor />} />
                         <Route path="/status" element={<StatusMonitor />} />

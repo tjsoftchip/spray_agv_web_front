@@ -38,32 +38,6 @@ describe('API Services', () => {
     });
   });
 
-  describe('templateApi', () => {
-    it('应该获取模板列表', async () => {
-      const mockTemplates = [
-        { id: '1', name: 'Template 1' },
-        { id: '2', name: 'Template 2' },
-      ];
-
-      const mockResponse = { data: mockTemplates };
-      mockAxiosInstance.get.mockResolvedValue(mockResponse);
-
-      const { templateApi } = await import('../api');
-      const result = await templateApi.getTemplates();
-      expect(result).toEqual(mockTemplates);
-    });
-
-    it('应该创建新模板', async () => {
-      const newTemplate = { name: 'New Template', description: 'Test' };
-      const mockResponse = { data: { id: '3', ...newTemplate } };
-      mockAxiosInstance.post.mockResolvedValue(mockResponse);
-
-      const { templateApi } = await import('../api');
-      const result = await templateApi.createTemplate(newTemplate);
-      expect(result).toEqual(mockResponse.data);
-    });
-  });
-
   describe('taskApi', () => {
     it('应该获取任务列表', async () => {
       const mockTasks = [

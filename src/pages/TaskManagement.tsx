@@ -5,9 +5,8 @@ import { useNavigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { taskApi, templateApi, mapApi } from '../services/api';
+import { taskApi, mapApi } from '../services/api';
 import dayjs from 'dayjs';
-import TemplateDragSelector from '../components/TemplateDragSelector';
 import BeamPositionSelector from '../components/BeamPositionSelector';
 import JobRoutePlanner from '../components/JobRoutePlanner';
 
@@ -193,7 +192,6 @@ const SortableTaskCard: React.FC<SortableTaskCardProps> = ({
 const TaskManagement: React.FC = () => {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<any[]>([]);
-  const [templates, setTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [queueStatus, setQueueStatus] = useState<'idle' | 'running' | 'paused'>('idle');
@@ -218,7 +216,6 @@ const TaskManagement: React.FC = () => {
 
   useEffect(() => {
     loadTasks();
-    loadTemplates();
   }, []);
 
   const loadTasks = async () => {
@@ -231,15 +228,6 @@ const TaskManagement: React.FC = () => {
       message.error('加载任务列表失败');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadTemplates = async () => {
-    try {
-      const data = await templateApi.getTemplates();
-      setTemplates(data);
-    } catch (error: any) {
-      console.error('加载模板列表失败', error);
     }
   };
 
@@ -270,7 +258,6 @@ const TaskManagement: React.FC = () => {
         description: values.description || '',
         priority: values.priority || 2,
         status: 'pending',
-        templateIds: values.templateIds || [],
         executionType: values.operationType === 'scheduled' ? 'scheduled' : 'manual',
         operationType: values.operationType || 'single',
         scheduleConfig: values.scheduleConfig || null,

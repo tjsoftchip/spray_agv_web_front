@@ -48,8 +48,8 @@ export const navigationApi = {
     return apiService.get(`/navigation/status/${taskId}`);
   },
 
-  gotoPoint: async (templateId: string, pointId: string) => {
-    return apiService.post('/navigation/goto-point', { templateId, pointId });
+  gotoPoint: async (pointId: string) => {
+    return apiService.post('/navigation/goto-point', { pointId });
   },
 
   setInitialPose: async (x: number, y: number, theta: number) => {

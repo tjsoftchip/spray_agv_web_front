@@ -76,11 +76,6 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       label: '状态监控',
     },
     {
-      key: '/templates',
-      icon: <FileTextOutlined />,
-      label: '模板管理',
-    },
-    {
       key: '/tasks',
       icon: <UnorderedListOutlined />,
       label: '任务管理',

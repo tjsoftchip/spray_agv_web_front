@@ -6,7 +6,6 @@ interface Task {
   description: string;
   status: 'pending' | 'running' | 'paused' | 'completed' | 'failed';
   priority: number;
-  templateIds: string[];
   transitionSequence: string[];
   operationFrequency: any;
   executionParams: any;

@@ -301,7 +301,9 @@ const StatusMonitor: React.FC = () => {
           latitude: prev?.latitude ?? 0,
           longitude: prev?.longitude ?? 0,
           altitude: prev?.altitude ?? 0,
-          isFixed: quality === 4 || quality === 5  // RTK Fixed=4, RTK Float=5
+          // GPS质量定义: 0=无效, 1=SPS, 2=DGPS, 3=PPS, 4=RTK固定, 5=RTK浮动, 6=DR, 7=手动, 8=模拟
+          // isFixed: 只有RTK固定(4)或RTK浮动(5)才是有效定位
+          isFixed: quality === 4 || quality === 5
         }));
         
         // 检测GPS丢失（quality为0表示无定位）
@@ -878,10 +880,13 @@ const StatusMonitor: React.FC = () => {
                     />
                   </div>
                   <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-                    质量: {gpsStatus.quality === 0 ? '无定位' : 
-                           gpsStatus.quality === 1 ? 'GPS定位' : 
-                           gpsStatus.quality === 2 ? 'DGPS定位' : 
-                           gpsStatus.quality === 4 ? 'RTK固定解' : '未知'}
+                    质量: {gpsStatus.quality === 0 ? '无定位' :
+                           gpsStatus.quality === 1 ? 'SPS单点' :
+                           gpsStatus.quality === 2 ? 'DGPS差分' :
+                           gpsStatus.quality === 3 ? 'PPS模式' :
+                           gpsStatus.quality === 4 ? 'RTK固定解✓' :
+                           gpsStatus.quality === 5 ? 'RTK浮动解⚡' :
+                           gpsStatus.quality === 6 ? 'DR估算' : '其他'}
                   </div>
                 </>
               ) : (

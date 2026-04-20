@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 
 interface GPSStatusCardProps {
-  quality: number;           // 0-5 GPS质量
+  quality: number;           // 0-8 GPS质量: 0=无效, 1=SPS, 2=DGPS, 3=PPS, 4=Fixed, 5=Float, 6=DR, 7=手动, 8=模拟
   satellites: number;        // 卫星数量
   hdop: number;              // HDOP值
   latitude?: number;         // 纬度
@@ -33,21 +33,28 @@ const GPSStatusCard: React.FC<GPSStatusCardProps> = ({
   isFixed,
   lastUpdate
 }) => {
-  // 获取GPS质量状态
+  // 获取GPS质量状态（根据官方手册）
+  // 0=无效, 1=定位有效, 2=差分有效, 3=PPS, 4=RTK固定, 5=RTK浮动, 6=估算, 7=手动, 8=模拟
   const getQualityInfo = (q: number) => {
     switch (q) {
-      case 4: // RTK Fixed
-        return { text: 'RTK Fixed', color: 'success', icon: <CheckCircleFilled />, precision: '厘米级' };
-      case 5: // RTK Float
-        return { text: 'RTK Float', color: 'warning', icon: <WarningFilled />, precision: '分米级' };
-      case 3: // PPS
-        return { text: 'PPS', color: 'processing', icon: <SignalFilled />, precision: '~1m' };
-      case 2: // DGPS
-        return { text: 'DGPS', color: 'processing', icon: <SignalFilled />, precision: '~3m' };
-      case 1: // SPS
-        return { text: 'SPS', color: 'default', icon: <SignalFilled />, precision: '~10m' };
-      default: // Invalid
-        return { text: '无效', color: 'error', icon: <CloseCircleFilled />, precision: '-' };
+      case 4: // RTK Fixed - 厘米级精度，导航可靠
+        return { text: 'RTK Fixed', color: 'success', icon: <CheckCircleFilled />, precision: '厘米级', reliable: true };
+      case 5: // RTK Float - 分米级精度，可限速导航
+        return { text: 'RTK Float', color: 'warning', icon: <WarningFilled />, precision: '分米级', reliable: true };
+      case 6: // DR - 估算模式，精度不可靠
+        return { text: 'DR估算', color: 'warning', icon: <WarningFilled />, precision: '估算', reliable: false };
+      case 3: // PPS模式
+        return { text: 'PPS', color: 'processing', icon: <SignalFilled />, precision: '~1m', reliable: false };
+      case 2: // DGPS - 差分定位
+        return { text: 'DGPS', color: 'processing', icon: <SignalFilled />, precision: '~1m', reliable: false };
+      case 1: // SPS - 单点定位
+        return { text: 'SPS', color: 'default', icon: <SignalFilled />, precision: '~10m', reliable: false };
+      case 7: // 手动输入
+        return { text: '手动输入', color: 'error', icon: <CloseCircleFilled />, precision: '-', reliable: false };
+      case 8: // 模拟器
+        return { text: '模拟器', color: 'error', icon: <CloseCircleFilled />, precision: '-', reliable: false };
+      default: // 0=无效或其他
+        return { text: '无效', color: 'error', icon: <CloseCircleFilled />, precision: '-', reliable: false };
     }
   };
 
@@ -85,8 +92,8 @@ const GPSStatusCard: React.FC<GPSStatusCardProps> = ({
         {/* 精度说明 */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>定位精度:</span>
-          <span style={{ color: isFixed ? '#52c41a' : '#faad14' }}>
-            {qualityInfo.precision}
+          <span style={{ color: qualityInfo.reliable ? '#52c41a' : '#faad14' }}>
+            {qualityInfo.precision} {qualityInfo.reliable ? '✓' : '⚠'}
           </span>
         </div>
 

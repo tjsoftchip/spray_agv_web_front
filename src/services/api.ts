@@ -135,14 +135,6 @@ export const authApi = {
   refreshToken: () => apiService.post('/auth/refresh'),
 };
 
-export const templateApi = {
-  getTemplates: () => apiService.get('/templates'),
-  getTemplateById: (id: string) => apiService.get(`/templates/${id}`),
-  createTemplate: (data: any) => apiService.post('/templates', data),
-  updateTemplate: (id: string, data: any) => apiService.put(`/templates/${id}`, data),
-  deleteTemplate: (id: string) => apiService.delete(`/templates/${id}`),
-};
-
 export const taskApi = {
   getTasks: () => apiService.get('/tasks'),
   getTaskById: (id: string) => apiService.get(`/tasks/${id}`),
