@@ -15,7 +15,7 @@ const DeviceControl: React.FC = () => {
   // const [controlMode, setControlMode] = useState<'auto' | 'manual'>('auto');
   const [velocity, setVelocity] = useState({ linear: 0, angular: 0 });
   const [steerAngle, setSteerAngle] = useState(0); // 转向角度 -18~18 度
-  const [maxSteerAngle, setMaxSteerAngle] = useState(24); // 最大转向角度，默认24度
+  const [maxSteerAngle, setMaxSteerAngle] = useState(22); // 最大转向角度，默认22度（机械极限）
   const [joystickPosition, setJoystickPosition] = useState({ x: 0, y: 0 }); // 摇杆位置 -1~1
   const [isDragging, setIsDragging] = useState(false);
   const joystickRef = useRef<HTMLDivElement>(null);
@@ -191,8 +191,8 @@ const DeviceControl: React.FC = () => {
   // 线速度滑块变化处理
   const handleLinearSpeedChange = (value: number) => {
     const linear = value;
-    const angular = steerAngle / 34; // 转向角度转换为比例 -1~1
-    
+    const angular = steerAngle / 22; // 转向角度转换为比例 -1~1（22°机械极限）
+
     setVelocity({ linear, angular });
     currentVelocityRef.current = { linear, angular };
     
@@ -209,7 +209,7 @@ const DeviceControl: React.FC = () => {
   // 转向滑块变化处理
   const handleSteerAngleChange = (value: number) => {
     setSteerAngle(value);
-    const angular = value / 34; // 转向角度转换为比例 -1~1
+    const angular = value / 22; // 转向角度转换为比例 -1~1（22°机械极限）
     const linear = velocity.linear;
     
     currentVelocityRef.current = { linear, angular };
@@ -245,11 +245,7 @@ const DeviceControl: React.FC = () => {
   const handleLinearRelease = () => {
     setVelocity({ linear: 0, angular: velocity.angular });
     const linear = 0;
-    const angular = steerAngle / 34;
-    
-    currentVelocityRef.current = { linear, angular };
-    
-    // 如果转向也为0，停止发送
+    const angular = steerAngle / 22;
     if (angular === 0) {
       stopVelocityPublishing();
       sendVelocityCommand(0, 0);
@@ -266,8 +262,8 @@ const DeviceControl: React.FC = () => {
     const linear = y * maxSpeed;
     // 计算转向角度（应用maxSteerAngle限制），然后镜像反转
     const angle = Math.round(x * maxSteerAngle);
-    // angular 基于34度比例，但使用受限制的角度值，并反转方向
-    const angular = -angle / 34;
+    // angular 基于22度比例（机械极限），使用受限制的角度值，并反转方向
+    const angular = -angle / 22;
     
     setSteerAngle(angle);
     setVelocity({ linear, angular });
