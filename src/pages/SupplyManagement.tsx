@@ -198,9 +198,13 @@ const SupplyManagement: React.FC = () => {
     }
   };
 
-  const handleNavigateToStation = () => {
-    sendSupplyCommand('navigate_to_station');
-    message.info('导航到补给站');
+  const handleNavigateToStation = async () => {
+    try {
+      await supplyManagementApi.startSupply();
+      message.success('正在导航到补给站');
+    } catch (error: any) {
+      message.error('导航到补给站失败');
+    }
   };
 
   const handleStartCharging = async () => {
@@ -243,10 +247,9 @@ const SupplyManagement: React.FC = () => {
     }
   };
 
-  const handleManualSupply = () => {
+  const handleManualSupply = async () => {
     if (supplyStatus.status === 'idle') {
-      sendSupplyCommand('start_supply');
-      message.success('手动触发补给流程');
+      await handleStartSupply();
     } else {
       message.warning('补给正在进行中，请稍后再试');
     }
