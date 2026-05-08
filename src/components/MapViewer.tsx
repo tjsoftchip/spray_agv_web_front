@@ -21,6 +21,7 @@ interface MapViewerProps {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onMapClick?: (position: { x: number; y: number }) => void;
   robotPosition?: { x: number; y: number };
+  robotOrientation?: number; // 航向角（弧度）
   center?: [number, number];
   zoom?: number;
   onMapLoaded?: (mapInfo: { origin: { x: number; y: number; z: number }; resolution: number; width: number; height: number }) => void;
@@ -43,6 +44,7 @@ const MapViewer: React.FC<MapViewerProps> = ({
   roadSegments = [],
   onMapClick,
   robotPosition,
+  robotOrientation = 0,
   onMapLoaded,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -339,48 +341,52 @@ const MapViewer: React.FC<MapViewerProps> = ({
       const robotX = (robotPosition.x - origin.position.x) / resolution;
       const robotY = (robotPosition.y - origin.position.y) / resolution;
       const canvasY = height - 1 - robotY;
-      
-      // 检查机器人是否在地图范围内
-      if (robotX >= 0 && robotX < width && robotY >= 0 && robotY < height) {
+
+      // 检查机器人是否在地图范围内（允许一定冗余以显示在边缘的机器人）
+      const margin = 20;
+      if (robotX >= -margin && robotX < width + margin && robotY >= -margin && robotY < height + margin) {
         ctx.save();
         ctx.translate(robotX, canvasY);
-        
+        // 旋转：ROS 中 yaw=0 朝东，Canvas 中 0 度朝右（东），因此直接用 -yaw 即可
+        // 但因为 Y 轴翻转，航向角也需要取反
+        ctx.rotate(-robotOrientation);
+
         // 绘制机器人圆圈
         ctx.fillStyle = '#ff4d4f';
         ctx.beginPath();
-        ctx.arc(0, 0, 5, 0, 2 * Math.PI);
+        ctx.arc(0, 0, 6, 0, 2 * Math.PI);
         ctx.fill();
-        
+
         // 绘制外圈（深色边框）
         ctx.strokeStyle = '#000';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(0, 0, 5, 0, 2 * Math.PI);
+        ctx.arc(0, 0, 6, 0, 2 * Math.PI);
         ctx.stroke();
-        
+
         // 绘制方向箭头（深蓝色）
         ctx.strokeStyle = '#1890ff';
         ctx.fillStyle = '#1890ff';
         ctx.lineWidth = 2.5;
-        
-        // 箭头主线
+
+        // 箭头主线（朝东为0度方向）
         ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.lineTo(12, 0);
+        ctx.lineTo(14, 0);
         ctx.stroke();
-        
+
         // 箭头头部
         ctx.beginPath();
-        ctx.moveTo(12, 0);
-        ctx.lineTo(9, -3);
-        ctx.lineTo(9, 3);
+        ctx.moveTo(14, 0);
+        ctx.lineTo(10, -4);
+        ctx.lineTo(10, 4);
         ctx.closePath();
         ctx.fill();
-        
+
         ctx.restore();
       }
     }
-  }, [mapData, navigationPoints, roadSegments, robotPosition, scale, offset, containerSize]);
+  }, [mapData, navigationPoints, roadSegments, robotPosition, robotOrientation, scale, offset, containerSize]);
 
   // 鼠标事件处理
   const handleMouseDown = (e: React.MouseEvent) => {

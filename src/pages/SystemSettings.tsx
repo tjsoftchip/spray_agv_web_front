@@ -137,7 +137,7 @@ const SystemSettings: React.FC = () => {
             label="低水位阈值 (%)"
             rules={[{ required: true }]}
           >
-            <InputNumber min={5} max={50} step={1} style={{ width: '100%' }} />
+            <InputNumber min={1} max={50} step={1} style={{ width: '100%' }} />
           </Form.Item>
 
           <Form.Item

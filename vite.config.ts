@@ -39,14 +39,10 @@ export default defineConfig({
         timeout: 30000,
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, _res) => {
-            console.log('Proxy error:', err.message);
-            // 如果连接失败，尝试备用地址
-            if (err.message.includes('ECONNREFUSED')) {
-              console.log('Backend not ready, retrying...');
+            // 只打印非预期的代理错误，忽略后端未启动的重试
+            if (!err.message.includes('ECONNREFUSED')) {
+              console.log('Proxy error:', err.message);
             }
-          });
-          proxy.on('proxyReq', (_proxyReq, req, _res) => {
-            console.log('Proxying:', req.method, req.url);
           });
         },
       },
@@ -59,8 +55,8 @@ export default defineConfig({
         rewriteWsOrigin: true,
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, _res) => {
-            // 忽略 ECONNRESET 错误，这是正常的 WebSocket 断开重连
-            if (!err.message.includes('ECONNRESET')) {
+            // 忽略 ECONNRESET（正常重连）和 ECONNREFUSED（后端未启动）
+            if (!err.message.includes('ECONNRESET') && !err.message.includes('ECONNREFUSED')) {
               console.log('WebSocket proxy error:', err.message);
             }
           });

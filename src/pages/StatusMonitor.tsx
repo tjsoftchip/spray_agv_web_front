@@ -32,6 +32,10 @@ interface NavigationStatus {
 const StatusMonitor: React.FC = () => {
   // 机器人位置（初始为世界坐标原点，等待从 ROS2 获取实际位置）
   const [robotPosition, setRobotPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [robotOrientation, setRobotOrientation] = useState<number>(0); // 航向角（弧度）
+  const robotPoseSourceRef = useRef<'amcl' | 'robot_pose' | 'odom' | null>(null);
+  const lastAmclTimeRef = useRef<number>(0); // 上次收到 AMCL 数据的时间
+  const AMCL_TIMEOUT = 2000; // AMCL 超过2秒未更新才降级到 odom
   const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
   const [waterLevel, setWaterLevel] = useState<number | null>(null);
   const [linearVelocity, setLinearVelocity] = useState(0); // 线速度 m/s
@@ -56,6 +60,11 @@ const StatusMonitor: React.FC = () => {
   const [lidarOnline, setLidarOnline] = useState(false);
   const [cameraOnline, setCameraOnline] = useState(false);
   
+  // 四元数转航向角
+  const quaternionToYaw = (x: number, y: number, z: number, w: number): number => {
+    return Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z));
+  };
+
   // 性能优化：节流refs
   const lastVelUpdateRef = useRef<number>(0);
   const lastPoseUpdateRef = useRef<number>(0);
@@ -253,23 +262,50 @@ const StatusMonitor: React.FC = () => {
         }
       }
       
-      // 位姿更新节流
+      // 位姿更新 — 带优先级：AMCL > robot_pose > odom
       if ((data.topic === '/robot_pose' || data.topic === '/amcl_pose' || data.topic === '/odom') && data.msg) {
         const now = Date.now();
         if (now - lastPoseUpdateRef.current < THROTTLE_MS) return; // 节流
         lastPoseUpdateRef.current = now;
-        
-        let position;
-        if (data.topic === '/robot_pose' && data.msg.pose) {
+
+        let position: { x: number; y: number } | undefined;
+        let orientation: { x: number; y: number; z: number; w: number } | undefined;
+        let source: 'amcl' | 'robot_pose' | 'odom';
+
+        if (data.topic === '/amcl_pose' && data.msg.pose) {
+          // AMCL — 最高优先级（map 坐标系，经过粒子滤波校正）
+          position = data.msg.pose.pose.position;
+          orientation = data.msg.pose.pose.orientation;
+          source = 'amcl';
+        } else if (data.topic === '/robot_pose' && data.msg.pose) {
+          // robot_pose — 次高优先级（通常也是 map 坐标系）
           position = data.msg.pose.position;
-        } else if (data.topic === '/amcl_pose' && data.msg.pose) {
-          position = data.msg.pose.pose.position;
+          orientation = data.msg.pose.orientation;
+          source = 'robot_pose';
         } else if (data.topic === '/odom' && data.msg.pose) {
+          // odom — 最低优先级，仅在 AMCL 长时间未更新时使用
+          // odom 坐标系会累积漂移，与 map 坐标系存在偏移
+          const timeSinceAmcl = now - lastAmclTimeRef.current;
+          if (lastAmclTimeRef.current > 0 && timeSinceAmcl < AMCL_TIMEOUT) {
+            // AMCL 仍然活跃，忽略 odom 数据
+            return;
+          }
           position = data.msg.pose.pose.position;
+          orientation = data.msg.pose.pose.orientation;
+          source = 'odom';
+        } else {
+          return;
         }
-        
+
         if (position) {
+          if (source === 'amcl' || source === 'robot_pose') {
+            lastAmclTimeRef.current = now;
+          }
+          robotPoseSourceRef.current = source;
           setRobotPosition({ x: position.x, y: position.y });
+          if (orientation) {
+            setRobotOrientation(quaternionToYaw(orientation.x, orientation.y, orientation.z, orientation.w));
+          }
         }
       }
 
@@ -667,11 +703,12 @@ const StatusMonitor: React.FC = () => {
   const handleAcknowledgeAlarm = async (alarmId: string) => {
     try {
       // 通过 rosbridge 调用服务
+      // 后端使用 example_interfaces/srv/Trigger，请求消息为空
       socketService.sendRosCommand({
         op: 'call_service',
         service: '/alarm/acknowledge',
-        type: 'std_srvs/srv/Trigger',
-        args: { request: { alarm_id: alarmId } }
+        type: 'example_interfaces/srv/Trigger',
+        args: {}
       });
       
       // 本地更新状态（乐观更新）
@@ -690,8 +727,8 @@ const StatusMonitor: React.FC = () => {
       socketService.sendRosCommand({
         op: 'call_service',
         service: '/alarm/clear',
-        type: 'std_srvs/srv/Trigger',
-        args: { request: { alarm_id: alarmId } }
+        type: 'example_interfaces/srv/Trigger',
+        args: {}
       });
       
       // 本地移除报警（乐观更新）
@@ -1253,6 +1290,7 @@ const StatusMonitor: React.FC = () => {
                 navigationPoints={mockNavigationPoints}
                 roadSegments={mockRoadSegments}
                 robotPosition={robotPosition}
+                robotOrientation={robotOrientation}
                 center={mapCenter}
                 zoom={16}
                 onMapLoaded={handleMapLoaded}
