@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Row, Col, Switch, Button, Space, message, InputNumber, Slider } from 'antd';
+import { Card, Row, Col, Switch, Space, message, InputNumber, Slider } from 'antd';
 import { socketService } from '../services/socket';
 
 const DeviceControl: React.FC = () => {
@@ -24,7 +24,6 @@ const DeviceControl: React.FC = () => {
   const currentVelocityRef = useRef({ linear: 0, angular: 0 }); // 存储当前速度，供定时器使用
   const [maxSpeed, setMaxSpeed] = useState(0.35); // 默认最大速度0.35m/s，最大限制1m/s
   const [isJoystickActive, setIsJoystickActive] = useState(true); // 手柄激活状态
-  const [isFullControlMode, setIsFullControlMode] = useState(false); // 完全接管模式状态
 
   const [emergencyStopActive, setEmergencyStopActive] = useState(false); // 紧急停止状态
   useEffect(() => {
@@ -57,7 +56,7 @@ const DeviceControl: React.FC = () => {
   useEffect(() => {
     socketService.connect();
     
-    // 声明 /manual/cmd_vel 话题，确保可以发布
+    // 声明需要发布的话题，确保可以发布
     socketService.sendRosCommand({
       op: 'advertise',
       topic: '/manual/cmd_vel',
@@ -380,22 +379,6 @@ const DeviceControl: React.FC = () => {
   };
 
 
-  // 切换完全接管模式
-  const toggleFullControlMode = () => {
-    const newMode = !isFullControlMode;
-    setIsFullControlMode(newMode);
-    
-    // 发布完全接管模式状态到 ROS2（控制遥控器和网页摇杆）
-    publishRosCommand('/joystick/full_control_state', 'std_msgs/Bool', { data: newMode });
-    publishRosCommand('/manual/full_control_state', 'std_msgs/Bool', { data: newMode });
-    
-    if (newMode) {
-      message.success('完全接管模式已启用 - 网页摇杆获得最高控制权（仅次于遥控器）');
-    } else {
-      message.info('完全接管模式已禁用 - 恢复默认优先级管理');
-    }
-  };
-
   return (
       <div>
         <Card 
@@ -517,138 +500,12 @@ const DeviceControl: React.FC = () => {
                   <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>推动摇杆控制方向和速度，松手自动停止</div>
                 </div>
 
-                {/* 停止按钮 */}
-                <Button
-                  type="primary"
-                  danger
-                  size="large"
-                  onClick={handleStopAll}
-                  style={{ width: '100%', marginTop: 16, height: 50, fontSize: 16 }}
-                >
-                  紧急停止
-                </Button>
 
-                {/* 当前状态显示 */}
-                <div style={{ 
-                  marginTop: 16,
-                  textAlign: 'center',
-                  background: 'white',
-                  padding: '16px 24px',
-                  borderRadius: 8,
-                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-                  width: '100%'
-                }}>
-                  <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
-                    当前状态
-                  </div>
-                  <div style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-around',
-                    color: '#495057'
-                  }}>
-                    <div>
-                      <div style={{ fontSize: 12, color: '#6c757d' }}>线速度</div>
-                      <div style={{ fontSize: 18, fontWeight: 'bold', color: '#667eea' }}>
-                        {velocity.linear.toFixed(2)} m/s
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 12, color: '#6c757d' }}>转向角度</div>
-                      <div style={{ fontSize: 18, fontWeight: 'bold', color: '#764ba2' }}>
-                        {steerAngle}°
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 完全接管模式切换按键 */}
-                <div style={{ 
-                  marginTop: 16,
-                  textAlign: 'center',
-                  background: isFullControlMode ? '#fff3cd' : '#d4edda',
-                  padding: '16px 24px',
-                  borderRadius: 8,
-                  border: `2px solid ${isFullControlMode ? '#ffeeba' : '#c3e6cb'}`,
-                  width: '100%'
-                }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: isFullControlMode ? '#856404' : '#155724' }}>
-                    🎮 完全接管模式
-                  </div>
-                  <Button
-                    type="default"
-                    size="large"
-                    onClick={toggleFullControlMode}
-                    style={{
-                      backgroundColor: isFullControlMode ? '#ffc107' : '#28a745',
-                      borderColor: isFullControlMode ? '#ffc107' : '#28a745',
-                      color: 'white',
-                      fontWeight: 600,
-                      minWidth: 120,
-                      height: 40,
-                      borderRadius: 6,
-                      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
-                    }}
-                  >
-                    {isFullControlMode ? '⚡ 已启用' : '🟢 已禁用'}
-                  </Button>
-                  <div style={{ 
-                    fontSize: 12, 
-                    marginTop: 8,
-                    color: isFullControlMode ? '#856404' : '#155724',
-                    lineHeight: 1.4
-                  }}>
-                    {isFullControlMode 
-                      ? '网页控制获得最高控制权，即使速度为0也保持控制' 
-                      : '默认优先级管理，按照优先级规则切换控制源'}
-                  </div>
-                </div>
 
               </div>
             </Col>
             <Col xs={24} md={12}>
               <div style={{ padding: '24px' }}>
-
-                {/* 紧急停止复位按钮 */}
-                {emergencyStopActive && (
-                  <div style={{ 
-                    marginTop: 20,
-                    textAlign: 'center',
-                    background: '#f8d7da',
-                    padding: '16px 24px',
-                    borderRadius: 8,
-                    border: '2px solid #f5c6cb',
-                    width: '100%'
-                  }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: '#721c24' }}>
-                      🛑 紧急停止已触发
-                    </div>
-                    <Button
-                      type="default"
-                      size="large"
-                      onClick={resetEmergencyStop}
-                      style={{
-                        backgroundColor: '#dc3545',
-                        borderColor: '#dc3545',
-                        color: 'white',
-                        fontWeight: 600,
-                        minWidth: 120,
-                        height: 40,
-                        borderRadius: 6,
-                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
-                      }}
-                    >
-                      🔓 复位控制权
-                    </Button>
-                    <div style={{ 
-                      fontSize: 12, 
-                      marginTop: 8,
-                      color: '#721c24',
-                      lineHeight: 1.4
-                    }}>
-                      点击复位按钮以恢复所有控制权
-                    </div>
-                  </div>
-                )}
 
                 <div style={{ 
                   marginBottom: 24,

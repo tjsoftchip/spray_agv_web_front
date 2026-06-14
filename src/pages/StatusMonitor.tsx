@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Card, Row, Col, Progress, Tag, Button, Space, Switch, Badge, Tooltip, notification } from 'antd';
+import { Card, Row, Col, Progress, Tag, Button, Space, Switch, Badge, Tooltip, notification, message } from 'antd';
 import { 
-  PlayCircleOutlined, 
-  PauseOutlined, 
-  StopOutlined,
   EyeOutlined,
   CompassOutlined,
   GlobalOutlined,
@@ -12,16 +9,21 @@ import {
 } from '@ant-design/icons';
 import MapViewer from '../components/MapViewer';
 import { socketService } from '../services/socket';
-import { navigationApi, obstacleApi } from '../services/navigationApi';
+import { obstacleApi } from '../services/navigationApi';
 import { systemApi } from '../services/systemApi';
 import type { ObstacleStatus } from '../services/navigationApi';
 
 interface NavigationStatus {
   status: string;
   taskId: string;
+  task_id?: string;
+  route_name?: string;
   progress: number;
   currentIndex: number;
   totalPoints: number;
+  current_segment?: number;
+  total_segments?: number;
+  errorMessage?: string | null;
   currentPoint?: {
     pointName: string;
     position: { x: number; y: number };
@@ -33,7 +35,7 @@ const StatusMonitor: React.FC = () => {
   // 机器人位置（初始为世界坐标原点，等待从 ROS2 获取实际位置）
   const [robotPosition, setRobotPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [robotOrientation, setRobotOrientation] = useState<number>(0); // 航向角（弧度）
-  const robotPoseSourceRef = useRef<'amcl' | 'robot_pose' | 'odom' | null>(null);
+  const robotPoseSourceRef = useRef<'gps_pose' | 'amcl' | 'robot_pose' | 'odom' | null>(null);
   const lastAmclTimeRef = useRef<number>(0); // 上次收到 AMCL 数据的时间
   const AMCL_TIMEOUT = 2000; // AMCL 超过2秒未更新才降级到 odom
   const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
@@ -47,13 +49,12 @@ const StatusMonitor: React.FC = () => {
     // 地图加载完成，机器人位置将从 ROS2 实时数据中获取
   };
   const [speed, setSpeed] = useState(0);
-  const [taskStatus] = useState<'idle' | 'running' | 'paused'>('idle');
+  // 任务状态从 navigationStatus 实时推导
   const [navigationStatus, setNavigationStatus] = useState<NavigationStatus | null>(null);
   const [obstacleStatus, setObstacleStatus] = useState<ObstacleStatus | null>(null);
   const [cameraImage, setCameraImage] = useState<string | null>(null);
   const [enableCameraPreview, setEnableCameraPreview] = useState(false);
   const [useWebVideoServer, setUseWebVideoServer] = useState(true); // 使用 web_video_server
-  const [controlLoading, setControlLoading] = useState(false);
   const [mapCenter] = useState<[number, number]>([0, 0]);
   
   // 传感器在线状态
@@ -173,10 +174,29 @@ const StatusMonitor: React.FC = () => {
     };
 
     const subscribeToRobotPose = () => {
+      // /gps/pose — 最高优先级：gps_to_map_node发布的GPS→map转换位姿（map坐标系）
+      // gps_to_map_node使用BEST_EFFORT QoS，必须匹配
+      socketService.sendRosCommand({
+        op: 'subscribe',
+        topic: '/gps/pose',
+        type: 'geometry_msgs/PoseWithCovarianceStamped',
+        options: {
+          qos: {
+            reliability: { type: 'best_effort' }
+          }
+        }
+      });
+
+      // localization_manager_node 以 BEST_EFFORT QoS 发布 /robot_pose (PoseWithCovarianceStamped)
       socketService.sendRosCommand({
         op: 'subscribe',
         topic: '/robot_pose',
-        type: 'geometry_msgs/PoseStamped'
+        type: 'geometry_msgs/PoseWithCovarianceStamped',
+        options: {
+          qos: {
+            reliability: { type: 'best_effort' }
+          }
+        }
       });
       
       socketService.sendRosCommand({
@@ -262,33 +282,43 @@ const StatusMonitor: React.FC = () => {
         }
       }
       
-      // 位姿更新 — 带优先级：AMCL > robot_pose > odom
-      if ((data.topic === '/robot_pose' || data.topic === '/amcl_pose' || data.topic === '/odom') && data.msg) {
+      // 位姿更新 — 带优先级：gps_pose > AMCL > robot_pose > odom
+      if ((data.topic === '/gps/pose' || data.topic === '/robot_pose' || data.topic === '/amcl_pose' || data.topic === '/odom') && data.msg) {
         const now = Date.now();
         if (now - lastPoseUpdateRef.current < THROTTLE_MS) return; // 节流
         lastPoseUpdateRef.current = now;
 
         let position: { x: number; y: number } | undefined;
         let orientation: { x: number; y: number; z: number; w: number } | undefined;
-        let source: 'amcl' | 'robot_pose' | 'odom';
+        let source: 'gps_pose' | 'amcl' | 'robot_pose' | 'odom';
 
-        if (data.topic === '/amcl_pose' && data.msg.pose) {
-          // AMCL — 最高优先级（map 坐标系，经过粒子滤波校正）
+        if (data.topic === '/gps/pose' && data.msg.pose) {
+          // /gps/pose — 最高优先级：gps_to_map_node发布的GPS→map转换位姿（map坐标系）
+          // 在GPS建图和导航模式下都能工作
+          position = data.msg.pose.pose.position;
+          orientation = data.msg.pose.pose.orientation;
+          source = 'gps_pose';
+        } else if (data.topic === '/amcl_pose' && data.msg.pose) {
+          // AMCL — 高优先级（map 坐标系，经过粒子滤波校正）
           position = data.msg.pose.pose.position;
           orientation = data.msg.pose.pose.orientation;
           source = 'amcl';
         } else if (data.topic === '/robot_pose' && data.msg.pose) {
-          // robot_pose — 次高优先级（通常也是 map 坐标系）
-          position = data.msg.pose.position;
-          orientation = data.msg.pose.orientation;
+          // robot_pose — 仅当 GPS/AMCL 超时未更新时才使用
+          // 注意：robot_pose 是 PoseWithCovarianceStamped，pose 在 pose.pose 下
+          const timeSinceAmcl = now - lastAmclTimeRef.current;
+          if (lastAmclTimeRef.current > 0 && timeSinceAmcl < AMCL_TIMEOUT) {
+            return; // GPS/AMCL 仍然活跃，忽略 robot_pose
+          }
+          position = data.msg.pose.pose?.position || data.msg.pose.position;
+          orientation = data.msg.pose.pose?.orientation || data.msg.pose.orientation;
           source = 'robot_pose';
         } else if (data.topic === '/odom' && data.msg.pose) {
-          // odom — 最低优先级，仅在 AMCL 长时间未更新时使用
+          // odom — 最低优先级，仅在 GPS/AMCL 长时间未更新时使用
           // odom 坐标系会累积漂移，与 map 坐标系存在偏移
           const timeSinceAmcl = now - lastAmclTimeRef.current;
           if (lastAmclTimeRef.current > 0 && timeSinceAmcl < AMCL_TIMEOUT) {
-            // AMCL 仍然活跃，忽略 odom 数据
-            return;
+            return; // GPS/AMCL 仍然活跃，忽略 odom 数据
           }
           position = data.msg.pose.pose.position;
           orientation = data.msg.pose.pose.orientation;
@@ -298,7 +328,7 @@ const StatusMonitor: React.FC = () => {
         }
 
         if (position) {
-          if (source === 'amcl' || source === 'robot_pose') {
+          if (source === 'amcl') {
             lastAmclTimeRef.current = now;
           }
           robotPoseSourceRef.current = source;
@@ -561,6 +591,7 @@ const StatusMonitor: React.FC = () => {
         
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/vel_raw' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/camera/color/image_raw/compressed' });
+        socketService.sendRosCommand({ op: 'unsubscribe', topic: '/gps/pose' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/robot_pose' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/amcl_pose' });
         socketService.sendRosCommand({ op: 'unsubscribe', topic: '/odom' });
@@ -615,42 +646,6 @@ const StatusMonitor: React.FC = () => {
     } catch (error) {
       console.error('Failed to load initial data:', error);
       setDataLoading(false);
-    }
-  };
-
-  const handlePause = async () => {
-    if (!navigationStatus) return;
-    setControlLoading(true);
-    try {
-      await navigationApi.pauseNavigation(navigationStatus.taskId);
-    } catch (error) {
-      console.error('Failed to pause navigation:', error);
-    } finally {
-      setControlLoading(false);
-    }
-  };
-
-  const handleResume = async () => {
-    if (!navigationStatus) return;
-    setControlLoading(true);
-    try {
-      await navigationApi.resumeNavigation(navigationStatus.taskId);
-    } catch (error) {
-      console.error('Failed to resume navigation:', error);
-    } finally {
-      setControlLoading(false);
-    }
-  };
-
-  const handleStop = async () => {
-    if (!navigationStatus) return;
-    setControlLoading(true);
-    try {
-      await navigationApi.stopNavigation(navigationStatus.taskId);
-    } catch (error) {
-      console.error('Failed to stop navigation:', error);
-    } finally {
-      setControlLoading(false);
     }
   };
 
@@ -720,7 +715,28 @@ const StatusMonitor: React.FC = () => {
     }
   };
 
-  // 报警清除
+  // 相机预览开关 — 按需启动/停止 web_video_server
+  const handleCameraPreviewToggle = async (checked: boolean) => {
+    if (checked) {
+      try {
+        await systemApi.startWebVideo();
+        setUseWebVideoServer(true);
+        setEnableCameraPreview(true);
+      } catch (error) {
+        console.error('Failed to start web_video_server:', error);
+        message.error('启动视频流失败，请确认相机已开启');
+      }
+    } else {
+      setEnableCameraPreview(false);
+      setCameraImage(null);
+      try {
+        await systemApi.stopWebVideo();
+      } catch (error) {
+        console.error('Failed to stop web_video_server:', error);
+      }
+    }
+  };
+
   const handleClearAlarm = async (alarmId: string) => {
     try {
       // 通过 rosbridge 调用服务
@@ -876,7 +892,10 @@ const StatusMonitor: React.FC = () => {
               </div>
               <div style={{ fontSize: '18px', fontWeight: 600, color: '#fa8c16' }}>
                 <div style={{ marginBottom: '4px' }}>横坐标: {robotPosition ? robotPosition.x.toFixed(2) : '--'}米</div>
-                <div>纵坐标: {robotPosition ? robotPosition.y.toFixed(2) : '--'}米</div>
+                <div style={{ marginBottom: '4px' }}>纵坐标: {robotPosition ? robotPosition.y.toFixed(2) : '--'}米</div>
+              </div>
+              <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                数据源: {robotPoseSourceRef.current === 'gps_pose' ? 'GPS(map)' : robotPoseSourceRef.current === 'amcl' ? 'AMCL(map)' : robotPoseSourceRef.current === 'robot_pose' ? 'robot_pose(可能odom)' : robotPoseSourceRef.current === 'odom' ? 'odom(会漂移)' : '等待中'}
               </div>
             </div>
           </Card>
@@ -1247,18 +1266,31 @@ const StatusMonitor: React.FC = () => {
                 🎯 任务与导航
               </div>
               <Space vertical size="small" style={{ width: '100%' }}>
-                <Tag 
-                  color={getStatusColor(taskStatus)} 
-                  style={{ fontSize: '14px', padding: '4px 12px', width: '100%' }}
-                >
-                  任务: {taskStatus === 'idle' ? '空闲' : taskStatus === 'running' ? '运行中' : '已暂停'}
-                </Tag>
-                <Tag 
-                  color={navigationStatus ? getStatusColor(navigationStatus.status) : 'default'}
-                  style={{ fontSize: '14px', padding: '4px 12px', width: '100%' }}
-                >
-                  导航: {navigationStatus ? navigationStatus.status : '无任务'}
-                </Tag>
+                {(() => {
+                  const rosStatus = navigationStatus?.status || 'idle';
+                  const statusText: Record<string, string> = {
+                    idle: '空闲', navigating: '导航中', spraying: '喷淋中',
+                    paused: '已暂停', completed: '已完成', failed: '失败',
+                  };
+                  const displayStatus = rosStatus === 'navigating' || rosStatus === 'spraying' ? 'running' : rosStatus;
+                  const taskName = navigationStatus?.route_name || navigationStatus?.task_id;
+                  return (
+                    <>
+                      <Tag
+                        color={getStatusColor(displayStatus)}
+                        style={{ fontSize: '14px', padding: '4px 12px', width: '100%', whiteSpace: 'normal', wordBreak: 'break-all', height: 'auto' }}
+                      >
+                        任务: {taskName ? `${taskName} (${statusText[rosStatus] || rosStatus})` : statusText[rosStatus] || rosStatus}
+                      </Tag>
+                      <Tag
+                        color={getStatusColor(displayStatus)}
+                        style={{ fontSize: '14px', padding: '4px 12px', width: '100%' }}
+                      >
+                        进度: {navigationStatus ? `${navigationStatus.progress || 0}%` : '无数据'}
+                      </Tag>
+                    </>
+                  );
+                })()}
               </Space>
             </div>
           </Card>
@@ -1308,7 +1340,7 @@ const StatusMonitor: React.FC = () => {
                 </span>
                 <Switch 
                   checked={enableCameraPreview}
-                  onChange={setEnableCameraPreview}
+                  onChange={handleCameraPreviewToggle}
                   checkedChildren="开启"
                   unCheckedChildren="关闭"
                 />
@@ -1396,104 +1428,6 @@ const StatusMonitor: React.FC = () => {
         </Col>
       </Row>
 
-      {/* 导航控制（如果有导航任务） */}
-      {navigationStatus && (
-        <Card 
-          title={<span style={{ fontSize: '16px', fontWeight: 600 }}>🧭 导航控制</span>}
-          style={{ 
-            marginTop: '16px',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.1)',
-            borderRadius: '8px',
-            border: 'none'
-          }}
-          styles={{ body: { padding: '20px' } }}
-        >
-          <Row gutter={[24, 16]}>
-            <Col xs={24} lg={8}>
-              <div style={{ 
-                padding: '20px',
-                backgroundColor: '#f5f5f5',
-                borderRadius: '8px',
-                height: '100%'
-              }}>
-                <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
-                  导航进度
-                </div>
-                <div style={{ fontSize: '24px', fontWeight: 600, color: '#1890ff', marginBottom: '12px' }}>
-                  {navigationStatus.currentIndex + 1} / {navigationStatus.totalPoints}
-                </div>
-                <Progress
-                  percent={parseFloat(navigationStatus.progress.toFixed(2))}
-                  strokeColor={{
-                    '0%': '#108ee9',
-                    '100%': '#87d068',
-                  }}
-                  status={navigationStatus.status === 'running' ? 'active' : 'normal'}
-                />
-              </div>
-            </Col>
-            <Col xs={24} lg={8}>
-              {navigationStatus.currentPoint && (
-                <div style={{ 
-                  padding: '20px',
-                  backgroundColor: '#f5f5f5',
-                  borderRadius: '8px',
-                  height: '100%'
-                }}>
-                  <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
-                    当前目标点
-                  </div>
-                  <div style={{ fontSize: '18px', fontWeight: 600, color: '#722ed1', marginBottom: '4px' }}>
-                    {navigationStatus.currentPoint.pointName}
-                  </div>
-                  <div style={{ fontSize: '13px', color: '#999' }}>
-                    坐标: ({navigationStatus.currentPoint.position.x.toFixed(2)}, {navigationStatus.currentPoint.position.y.toFixed(2)})
-                  </div>
-                </div>
-              )}
-            </Col>
-            <Col xs={24} lg={8}>
-              <Space size="middle" style={{ width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
-                {navigationStatus.status === 'running' && (
-                  <Button
-                    size="large"
-                    icon={<PauseOutlined />}
-                    onClick={handlePause}
-                    loading={controlLoading}
-                    style={{ minWidth: '100px' }}
-                  >
-                    暂停导航
-                  </Button>
-                )}
-                {navigationStatus.status === 'paused' && (
-                  <Button
-                    size="large"
-                    type="primary"
-                    icon={<PlayCircleOutlined />}
-                    onClick={handleResume}
-                    loading={controlLoading}
-                    style={{ minWidth: '100px' }}
-                  >
-                    恢复导航
-                  </Button>
-                )}
-                {(navigationStatus.status === 'running' || navigationStatus.status === 'paused') && (
-                  <Button
-                    size="large"
-                    danger
-                    icon={<StopOutlined />}
-                    onClick={handleStop}
-                    loading={controlLoading}
-                    style={{ minWidth: '100px' }}
-                  >
-                    停止导航
-                  </Button>
-                )}
-              </Space>
-            </Col>
-          </Row>
-        </Card>
-      )}
     </div>
   );
 };

@@ -45,7 +45,7 @@ export interface LogInfo {
 // 系统API对象
 export const systemApi = {
   // 获取系统状态
-  getSystemStatus: () => apiService.get('/system/status'),
+  getSystemStatus: () => apiService.get('/system/status', { timeout: 20000 }),
   
   // 获取当前模式
   getCurrentMode: () => apiService.get('/system/mode'),
@@ -67,4 +67,8 @@ export const systemApi = {
   
   // 获取话题列表
   getTopicList: () => apiService.get('/system/topics'),
+  
+  // web_video_server 按需启停
+  startWebVideo: () => apiService.post('/system/nodes/web-video/start'),
+  stopWebVideo: () => apiService.post('/system/nodes/web-video/stop'),
 };

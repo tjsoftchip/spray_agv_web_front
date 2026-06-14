@@ -11,7 +11,6 @@ import {
   SettingOutlined,
   UserOutlined,
   LogoutOutlined,
-  MonitorOutlined,
   ExclamationCircleOutlined,
   ReloadOutlined,
   EnvironmentOutlined,
@@ -99,11 +98,6 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       key: '/supply',
       icon: <ThunderboltOutlined />,
       label: '补给管理',
-    },
-    {
-      key: '/system',
-      icon: <MonitorOutlined />,
-      label: '系统监控',
     },
     {
       key: '/settings',

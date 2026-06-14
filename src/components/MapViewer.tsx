@@ -81,7 +81,15 @@ const MapViewer: React.FC<MapViewerProps> = ({
       try {
         setLoading(true);
         
-        let mapToLoad = null;
+        type MapMeta = {
+          id: string;
+          origin?: { x: number; y: number; z: number };
+          resolution?: number;
+          width?: number;
+          height?: number;
+          isActive?: boolean;
+        };
+        let mapToLoad: MapMeta | null = null;
         
         // 首先尝试从数据库获取默认地图
         try {
@@ -96,13 +104,15 @@ const MapViewer: React.FC<MapViewerProps> = ({
           console.warn('Failed to fetch active map from database:', error);
         }
         
-        // 如果数据库中没有，从地图列表获取
-        if (!mapToLoad) {
+        // 如果数据库中没有，或返回的数据缺少关键元数据，从地图列表获取
+        if (!mapToLoad || !mapToLoad.origin || !mapToLoad.resolution) {
           const response = await fetch('/api/maps/scan-local');
           const maps = await response.json();
           
-          // 查找激活的地图
-          const activeMap = maps.find((m: any) => m.isActive);
+          // 查找激活的地图，或用当前 ID 精确匹配
+          const activeMap = mapToLoad
+            ? maps.find((m: any) => m.id === mapToLoad!.id)
+            : maps.find((m: any) => m.isActive);
           mapToLoad = activeMap || maps[0];
         }
         
@@ -384,6 +394,26 @@ const MapViewer: React.FC<MapViewerProps> = ({
         ctx.fill();
 
         ctx.restore();
+
+        // 在机器人下方显示坐标标签
+        ctx.save();
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        const label = `(${robotPosition.x.toFixed(2)}, ${robotPosition.y.toFixed(2)})`;
+        const labelPadding = 4;
+        const labelY = canvasY + 16;
+        const labelWidth = ctx.measureText(label).width + labelPadding * 2;
+        const labelHeight = 20;
+        const labelX = robotX - labelWidth / 2;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.beginPath();
+        ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 4);
+        ctx.fill();
+
+        ctx.fillStyle = '#ff4d4f';
+        ctx.fillText(label, robotX, labelY + 14);
+        ctx.restore();
       }
     }
   }, [mapData, navigationPoints, roadSegments, robotPosition, robotOrientation, scale, offset, containerSize]);
@@ -407,7 +437,7 @@ const MapViewer: React.FC<MapViewerProps> = ({
   };
   
   const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
     setScale(prev => Math.max(0.1, Math.min(5, prev * delta)));
   };

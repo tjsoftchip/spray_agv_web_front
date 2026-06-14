@@ -80,7 +80,7 @@ const GPSStatusCard: React.FC<GPSStatusCardProps> = ({
       }
       style={{ marginBottom: 16 }}
     >
-      <Space direction="vertical" style={{ width: '100%' }} size="small">
+      <Space orientation="vertical" style={{ width: '100%' }} size="small">
         {/* GPS质量标签 */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>定位状态:</span>

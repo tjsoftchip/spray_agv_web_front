@@ -62,8 +62,8 @@ const MapManagement: React.FC = () => {
         setRobotPose({
           header: { frame_id: 'map' },
           pose: {
-            position: data.msg.position || data.msg.pose?.position,
-            orientation: data.msg.orientation || data.msg.pose?.orientation
+            position: data.msg.position || data.msg.pose?.pose?.position || data.msg.pose?.position,
+            orientation: data.msg.orientation || data.msg.pose?.pose?.orientation || data.msg.pose?.orientation
           }
         });
       } else if (data.topic === '/robot_pose_k') {

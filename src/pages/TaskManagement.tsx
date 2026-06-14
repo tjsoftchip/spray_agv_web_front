@@ -6,6 +6,7 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { taskApi, mapApi } from '../services/api';
+import { socketService } from '../services/socket';
 import dayjs from 'dayjs';
 import BeamPositionSelector from '../components/BeamPositionSelector';
 import JobRoutePlanner from '../components/JobRoutePlanner';
@@ -216,6 +217,17 @@ const TaskManagement: React.FC = () => {
 
   useEffect(() => {
     loadTasks();
+
+    // 监听后端推送的任务状态变化，自动刷新列表
+    socketService.connect();
+    socketService.on('task_status_changed', () => {
+      loadTasks();
+    });
+
+    return () => {
+      socketService.off('task_status_changed');
+      socketService.disconnect();
+    };
   }, []);
 
   const loadTasks = async () => {
@@ -579,7 +591,7 @@ const TaskManagement: React.FC = () => {
                 {({ getFieldValue }) => {
                   return getFieldValue('operationType') === 'scheduled' ? (
                     <Form.Item label="定时策略">
-                      <Space direction="vertical" style={{ width: '100%' }} size="small">
+                      <Space orientation="vertical" style={{ width: '100%' }} size="small">
                         <Form.Item
                           name={['scheduleConfig', 'type']}
                           label="执行周期"

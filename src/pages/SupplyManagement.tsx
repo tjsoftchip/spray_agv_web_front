@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Row, Col, Button, Space, Tag, message, Switch } from 'antd';
-import { EnvironmentOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { socketService } from '../services/socket';
 import { supplyManagementApi } from '../services/api';
 
@@ -9,12 +9,13 @@ const SupplyManagement: React.FC = () => {
     status: 'idle',
     chargingEnabled: true,
     wateringEnabled: true,
-    autoSupplyEnabled: false,
+    autoSupplyEnabled: true,
     waterLevel: 100,
     batteryLevel: 100,
     waterThreshold: 20,
     batteryThreshold: 20,
   });
+  const [operatingMode, setOperatingMode] = useState<'idle' | 'spray' | 'supply'>('idle');
   const [relayStatus, setRelayStatus] = useState<any>(null);
   const [chargingStatus, setChargingStatus] = useState<any>(null);
   const [networkConfig, setNetworkConfig] = useState({
@@ -96,54 +97,136 @@ const SupplyManagement: React.FC = () => {
     }
   };
 
+  const handleStartSupply = async () => {
+    try {
+      await supplyManagementApi.startSupply();
+      message.success('开始补给');
+    } catch {
+      message.error('开始补给失败');
+    }
+  };
+
+  const handleStopSupply = async () => {
+    try {
+      await supplyManagementApi.stopSupply();
+      message.success('停止补给');
+    } catch {
+      message.error('停止补给失败');
+    }
+  };
+
+  const startSupplyWithMode = async () => {
+    await handleStartSupply();
+    setOperatingMode('supply');
+  };
+
+  const handleManualSupply = async () => {
+    await startSupplyWithMode();
+  };
+
+  const handleCycleMode = async () => {
+    if (operatingMode === 'idle') {
+      try {
+        await supplyManagementApi.switchToSpray();
+        setOperatingMode('spray');
+        message.success('已切换到喷水模式');
+      } catch {
+        message.error('切换喷水模式失败');
+      }
+    } else if (operatingMode === 'spray') {
+      if (supplyStatus.autoSupplyEnabled) {
+        message.info('自动模式下补给由系统自动触发，无法手动切换');
+        return;
+      }
+      await startSupplyWithMode();
+    } else {
+      await handleStopSupply();
+      setOperatingMode('idle');
+    }
+  };
+
   useEffect(() => {
     socketService.connect();
-    
+
     const initializeData = async () => {
       await loadNetworkConfig();
     };
-    
+
     initializeData();
 
-    // 合并定时器：根据设备状态动态调整轮询间隔
-    // 在线设备每30秒轮询，离线设备每60秒轮询
     const statusCheckInterval = setInterval(() => {
       const relayOnline = relayStatus?.connected;
       const chargingOnline = chargingStatus?.connected;
-      
-      // 只在需要时才发起请求
+
       if (relayOnline || chargingOnline) {
         if (relayOnline) loadRelayStatus();
         if (chargingOnline) loadChargingStatus();
       } else {
-        // 离线状态也尝试重连
         loadRelayStatus();
         loadChargingStatus();
       }
-    }, 30000); // 统一使用30秒间隔
+    }, 30000);
 
-    socketService.on('ros_message', (data) => {
+    socketService.on('ros_message', (data: any) => {
       if (data.topic === '/supply_status') {
         const status = JSON.parse(data.msg.data);
-        setSupplyStatus(prev => {
-          if (prev.autoSupplyEnabled && prev.status === 'idle') {
-            const needSupply = status.waterLevel < prev.waterThreshold ||
-                             status.batteryLevel < prev.batteryThreshold;
-            if (needSupply) {
-              console.log('自动触发补给流程');
-              handleStartSupply();
-            }
+        setSupplyStatus(prev => ({ ...prev, ...status }));
+      }
+      if (data.topic === '/unified_state_machine/status') {
+        try {
+          const stateData = JSON.parse(data.msg.data);
+          const currentState = stateData.current_state || '';
+          if (currentState === 'spray_navigation') {
+            setOperatingMode('spray');
+          } else if (currentState === 'resupply_navigation' ||
+                     currentState === 'visual_servo_approach' ||
+                     currentState === 'precision_coast' ||
+                     currentState === 'visual_servo_locked' ||
+                     currentState === 'resupply_backing_out') {
+            setOperatingMode('supply');
+          } else {
+            setOperatingMode('idle');
           }
-          return { ...prev, ...status };
-        });
+        } catch {
+          // ignore parse errors
+        }
+      }
+    });
+
+    socketService.on('automation_status', (data: any) => {
+      if (data.auto_supply_enabled !== undefined) {
+        setSupplyStatus(prev => ({ ...prev, autoSupplyEnabled: data.auto_supply_enabled }));
       }
     });
 
     return () => {
       socketService.off('ros_message');
+      socketService.off('automation_status');
       clearInterval(statusCheckInterval);
     };
   }, [relayStatus?.connected, chargingStatus?.connected]);
+
+  useEffect(() => {
+    if (supplyStatus.autoSupplyEnabled && operatingMode === 'spray' && supplyStatus.status === 'idle') {
+      const needSupply = supplyStatus.waterLevel < supplyStatus.waterThreshold ||
+                       supplyStatus.batteryLevel < supplyStatus.batteryThreshold;
+      if (needSupply) {
+        console.log('自动触发补给流程');
+        setOperatingMode('supply');
+        handleStartSupply();
+      }
+    }
+  }, [supplyStatus.waterLevel, supplyStatus.batteryLevel]);
+
+  useEffect(() => {
+    if (operatingMode === 'supply' && supplyStatus.status === 'idle') {
+      if (supplyStatus.autoSupplyEnabled) {
+        setOperatingMode('spray');
+      } else {
+        setOperatingMode('idle');
+      }
+    }
+  }, [supplyStatus.status]);
 
   useEffect(() => {
     const hasValidConfig = networkConfig.relay_ip !== '192.168.4.1' && networkConfig.charging_ip !== '192.168.1.100';
@@ -153,66 +236,12 @@ const SupplyManagement: React.FC = () => {
     }
   }, [networkConfig.relay_ip, networkConfig.charging_ip, relayStatus?.ip, chargingStatus?.ipAddress]);
 
-  const sendSupplyCommand = (action: string) => {
-    socketService.sendRosCommand({
-      op: 'publish',
-      topic: '/supply_command',
-      msg: { data: JSON.stringify({ action }) },
-      type: 'std_msgs/String',
-    });
-  };
-
-  const handleStartSupply = async () => {
-    try {
-      await supplyManagementApi.startSupply();
-      message.success('开始补给');
-    } catch (error: any) {
-      message.error('开始补给失败');
-    }
-  };
-
-  const handleStopSupply = async () => {
-    try {
-      await supplyManagementApi.stopSupply();
-      message.success('停止补给');
-    } catch (error: any) {
-      message.error('停止补给失败');
-    }
-  };
-
-  const handlePauseSupply = async () => {
-    try {
-      await supplyManagementApi.pauseSupply();
-      message.success('暂停补给');
-    } catch (error: any) {
-      message.error('暂停补给失败');
-    }
-  };
-
-  const handleResumeSupply = async () => {
-    try {
-      await supplyManagementApi.resumeSupply();
-      message.success('恢复补给');
-    } catch (error: any) {
-      message.error('恢复补给失败');
-    }
-  };
-
-  const handleNavigateToStation = async () => {
-    try {
-      await supplyManagementApi.startSupply();
-      message.success('正在导航到补给站');
-    } catch (error: any) {
-      message.error('导航到补给站失败');
-    }
-  };
-
   const handleStartCharging = async () => {
     try {
       await supplyManagementApi.startCharging(networkConfig.charging_ip);
       message.success('开始充电');
       loadChargingStatus();
-    } catch (error: any) {
+    } catch {
       message.error('开始充电失败');
     }
   };
@@ -222,7 +251,7 @@ const SupplyManagement: React.FC = () => {
       await supplyManagementApi.stopCharging(networkConfig.charging_ip);
       message.success('停止充电');
       loadChargingStatus();
-    } catch (error: any) {
+    } catch {
       message.error('停止充电失败');
     }
   };
@@ -232,7 +261,7 @@ const SupplyManagement: React.FC = () => {
       await supplyManagementApi.startWateringRelay(networkConfig.relay_ip);
       message.success('开始注水');
       loadRelayStatus();
-    } catch (error: any) {
+    } catch {
       message.error('开始注水失败');
     }
   };
@@ -242,31 +271,21 @@ const SupplyManagement: React.FC = () => {
       await supplyManagementApi.stopWateringRelay(networkConfig.relay_ip);
       message.success('停止注水');
       loadRelayStatus();
-    } catch (error: any) {
+    } catch {
       message.error('停止注水失败');
     }
   };
 
-  const handleManualSupply = async () => {
-    if (supplyStatus.status === 'idle') {
-      await handleStartSupply();
-    } else {
-      message.warning('补给正在进行中，请稍后再试');
-    }
+  const modeLabels: Record<string, { label: string; color: string }> = {
+    idle: { label: '初始状态', color: 'default' },
+    spray: { label: '喷水作业', color: 'processing' },
+    supply: { label: '补给状态', color: 'orange' },
   };
 
-  const getStatusTag = (status: string) => {
-    const statusMap: any = {
-      idle: { color: 'default', text: '空闲' },
-      navigating: { color: 'processing', text: '导航中' },
-      aligning: { color: 'processing', text: '对齐中' },
-      watering: { color: 'blue', text: '注水中' },
-      charging: { color: 'orange', text: '充电中' },
-      completed: { color: 'success', text: '完成' },
-      failed: { color: 'error', text: '失败' },
-    };
-    const config = statusMap[status] || { color: 'default', text: status };
-    return <Tag color={config.color}>{config.text}</Tag>;
+  const nextModeText = () => {
+    if (operatingMode === 'idle') return '切换为喷水模式';
+    if (operatingMode === 'spray') return '切换为补给模式';
+    return '切换为初始状态';
   };
 
   return (
@@ -285,54 +304,37 @@ const SupplyManagement: React.FC = () => {
               <Col xs={24} lg={8}>
                 <Card size="small" title="🚀 主要操作" style={{ background: '#fafafa' }}>
                   <Space vertical style={{ width: '100%' }}>
-                    {supplyStatus.autoSupplyEnabled ? (
-                      <Button
-                        type="primary"
-                        size="large"
-                        block
-                        onClick={handleStopSupply}
-                        disabled={supplyStatus.status === 'idle'}
-                        style={{ height: '48px', fontSize: '16px' }}
-                      >
-                        停止自动补给
-                      </Button>
-                    ) : (
-                      <Button
-                        type="primary"
-                        size="large"
-                        block
-                        onClick={handleManualSupply}
-                        disabled={supplyStatus.status !== 'idle'}
-                        style={{ height: '48px', fontSize: '16px' }}
-                      >
-                        手动触发补给
-                      </Button>
-                    )}
                     <Button
-                      danger
+                      type="primary"
                       size="large"
                       block
-                      onClick={handleStopSupply}
-                      disabled={supplyStatus.status === 'idle'}
+                      onClick={handleManualSupply}
+                      disabled={
+                        supplyStatus.autoSupplyEnabled ||
+                        operatingMode === 'supply'
+                      }
                       style={{ height: '48px', fontSize: '16px' }}
                     >
-                      紧急停止
+                      手动触发补给
                     </Button>
                   </Space>
                 </Card>
               </Col>
               <Col xs={24} lg={8}>
-                <Card size="small" title="🧭 导航操作" style={{ background: '#fafafa' }}>
-                  <Button
-                    icon={<EnvironmentOutlined />}
-                    size="large"
-                    block
-                    onClick={handleNavigateToStation}
-                    disabled={supplyStatus.status !== 'idle'}
-                    style={{ height: '48px', fontSize: '16px' }}
-                  >
-                    导航到补给站
-                  </Button>
+                <Card size="small" title="🔄 模式切换" style={{ background: '#fafafa' }}>
+                  <Space vertical style={{ width: '100%' }}>
+                    <Button
+                      size="large"
+                      block
+                      onClick={handleCycleMode}
+                      style={{ height: '48px', fontSize: '16px' }}
+                    >
+                      {nextModeText()}
+                    </Button>
+                    <div style={{ fontSize: '13px', textAlign: 'center', padding: '4px 0' }}>
+                      当前状态: <Tag color={modeLabels[operatingMode].color}>{modeLabels[operatingMode].label}</Tag>
+                    </div>
+                  </Space>
                 </Card>
               </Col>
               <Col xs={24} lg={8}>
@@ -343,15 +345,20 @@ const SupplyManagement: React.FC = () => {
                         checkedChildren="全自动"
                         unCheckedChildren="手动"
                         checked={supplyStatus.autoSupplyEnabled}
-                        onChange={(checked) => {
+                        onChange={async (checked) => {
                           setSupplyStatus(prev => ({ ...prev, autoSupplyEnabled: checked }));
+                          try {
+                            await supplyManagementApi.setAutoSupplyEnabled(checked);
+                          } catch {
+                            console.error('同步自动补给状态失败');
+                          }
                           message.success(checked ? '已开启全自动补给' : '已切换到手动模式');
                         }}
                       />
                     </div>
                     <div style={{ fontSize: '12px', color: '#666', textAlign: 'center' }}>
                       {supplyStatus.autoSupplyEnabled 
-                        ? '根据水位电量自动触发补给' 
+                        ? '喷水模式下自动触发补给' 
                         : '手动控制补给功能'}
                     </div>
                   </Space>

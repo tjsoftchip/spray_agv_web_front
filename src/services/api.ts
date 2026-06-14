@@ -177,6 +177,10 @@ export const supplyManagementApi = {
   stopTask: () => apiService.post('/supply/management/task/stop'),
   getTaskPath: () => apiService.get('/supply/management/task/path'),
   
+  // 模式切换
+  switchToSpray: () => apiService.post('/supply/management/mode/spray'),
+  setAutoSupplyEnabled: (enabled: boolean) => apiService.post('/supply/management/mode/auto-supply', { enabled }),
+
   // 手动控制
   manualControl: (data: any) => apiService.post('/supply/management/control/manual', data),
   
@@ -285,6 +289,8 @@ export const systemApi = {
   stopChassis: () => apiService.post('/system/nodes/chassis/stop'),
   startCamera: () => apiService.post('/system/nodes/camera/start'),
   stopCamera: () => apiService.post('/system/nodes/camera/stop'),
+  startWebVideo: () => apiService.post('/system/nodes/web-video/start'),
+  stopWebVideo: () => apiService.post('/system/nodes/web-video/stop'),
   startLaser: () => apiService.post('/system/nodes/laser/start'),
   stopLaser: () => apiService.post('/system/nodes/laser/stop'),
   startPerception: () => apiService.post('/system/nodes/perception/start'),

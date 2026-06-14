@@ -404,12 +404,7 @@ const GPSMapping: React.FC = () => {
       const longitude = parseFloat(data.msg.longitude);
       const altitude = parseFloat(data.msg.altitude) || 0;
       
-      // 调试：每10次打印一次GPS数据
-      if (!window._gpsDebugCount) window._gpsDebugCount = 0;
-      window._gpsDebugCount++;
-      if (window._gpsDebugCount % 10 === 1) {
-        console.log('[GPS] 收到GPS数据:', latitude?.toFixed(7), longitude?.toFixed(7));
-      }
+      // GPS数据日志已关闭以节约CPU资源
       const newGpsData = {
         ...gpsDataRef.current,
         latitude,
@@ -1389,7 +1384,7 @@ const GPSMapping: React.FC = () => {
           {currentStep === 0 && (
             <Card title="原点校准" size="small" style={{ marginBottom: 16 }}>
               <Alert
-                message="请将车辆停放在补给站位置"
+                title="请将车辆停放在补给站位置"
                 description="GPS状态需要达到FIXED才能完成校准"
                 type="info"
                 showIcon
@@ -1409,7 +1404,7 @@ const GPSMapping: React.FC = () => {
                   </Button>
                 </>
               ) : (
-                <Space direction="vertical" style={{ width: '100%' }}>
+                <Space orientation="vertical" style={{ width: '100%' }}>
                   <Button
                     type="primary"
                     block
@@ -1463,7 +1458,7 @@ const GPSMapping: React.FC = () => {
                     showIcon
                     style={{ marginBottom: 16 }}
                   />
-                  <Space direction="vertical">
+                  <Space orientation="vertical">
                     <Statistic title="已记录GPS点" value={recordStatsRef.current.recorded} />
                     <Statistic title="尝试记录" value={recordStatsRef.current.attempted} />
                     {recordStatsRef.current.attempted > 0 && (
@@ -1547,7 +1542,7 @@ const GPSMapping: React.FC = () => {
                 </Space>
               }
             >
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 <Button
                   type="primary"
                   block
@@ -1614,7 +1609,7 @@ const GPSMapping: React.FC = () => {
                 </Space>
               }
             >
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 <Alert
                   message="准备就绪"
                   description={`${roads.length}条道路、${intersections.length}个交叉点、${beamPositions.length}个梁位`}
