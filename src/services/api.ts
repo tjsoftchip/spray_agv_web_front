@@ -291,6 +291,7 @@ export const systemApi = {
   stopCamera: () => apiService.post('/system/nodes/camera/stop'),
   startWebVideo: () => apiService.post('/system/nodes/web-video/start'),
   stopWebVideo: () => apiService.post('/system/nodes/web-video/stop'),
+  getWebVideoStatus: () => apiService.get('/system/nodes/web-video/status'),
   startLaser: () => apiService.post('/system/nodes/laser/start'),
   stopLaser: () => apiService.post('/system/nodes/laser/stop'),
   startPerception: () => apiService.post('/system/nodes/perception/start'),

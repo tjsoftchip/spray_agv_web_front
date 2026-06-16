@@ -715,6 +715,16 @@ const StatusMonitor: React.FC = () => {
     }
   };
 
+  // 页面加载时检测 web_video_server 状态（刷新后恢复预览）
+  useEffect(() => {
+    systemApi.getWebVideoStatus().then((res: any) => {
+      if (res.running) {
+        setUseWebVideoServer(true);
+        setEnableCameraPreview(true);
+      }
+    }).catch(() => {});
+  }, []);
+
   // 相机预览开关 — 按需启动/停止 web_video_server
   const handleCameraPreviewToggle = async (checked: boolean) => {
     if (checked) {
@@ -1376,9 +1386,11 @@ const StatusMonitor: React.FC = () => {
                     objectFit: 'contain'
                   }}
                   onError={(e) => {
-                    console.error('Failed to load video stream from web_video_server');
-                    // 回退到 WebSocket 方式
-                    setUseWebVideoServer(false);
+                    console.warn('web_video_server stream error, retrying...');
+                    // 强制重新加载（给个时间戳避免浏览器缓存）
+                    const img = e.target as HTMLImageElement;
+                    const baseUrl = img.src.split('?')[0];
+                    img.src = `${baseUrl}?_t=${Date.now()}&topic=/camera/color/image_raw&type=mjpeg&quality=80`;
                   }}
                 />
               ) : cameraImage ? (

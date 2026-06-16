@@ -71,4 +71,5 @@ export const systemApi = {
   // web_video_server 按需启停
   startWebVideo: () => apiService.post('/system/nodes/web-video/start'),
   stopWebVideo: () => apiService.post('/system/nodes/web-video/stop'),
+  getWebVideoStatus: () => apiService.get('/system/nodes/web-video/status'),
 };
